@@ -1,0 +1,159 @@
+{
+  "date": "2026-10-27",
+  "platform": "Windows x64",
+  "scope": "Actual isolated Rust backend with production release optimization settings and synthetic local upstreams. Not a packaged application release.",
+  "backendSha256": "4912b691243c38d59192bc4529449c0f21317cf9d68a9a165707275ffbfbb9ca",
+  "sharedSourceSha256": {
+    "model_metadata.rs": "9d32b4b3c5254b6615f40eebe0d94c06a5e7825cb775e4b065708b67a89ea845",
+    "catalog.rs": "5590cf8ce7cf3a4151bb034ef5a539907d10f1948165739d7ba7b8a023a03be9"
+  },
+  "benchmark": {
+    "runs": 3,
+    "baseline200": {
+      "refreshMs": 9345.7063,
+      "cachedMs": 9217.0074
+    },
+    "rows": [
+      {
+        "models": 200,
+        "refresh": {
+          "medianMs": 271.08359999999993,
+          "rangeMs": [
+            246.71530000000007,
+            381.08939999999996
+          ],
+          "samplesMs": [
+            271.08359999999993,
+            381.08939999999996,
+            246.71530000000007
+          ]
+        },
+        "cached": {
+          "medianMs": 110.00310000000002,
+          "rangeMs": [
+            108.7432,
+            126.48619999999994
+          ],
+          "samplesMs": [
+            110.00310000000002,
+            126.48619999999994,
+            108.7432
+          ]
+        }
+      },
+      {
+        "models": 1000,
+        "refresh": {
+          "medianMs": 169.04459999999995,
+          "rangeMs": [
+            155.57960000000003,
+            227.41789999999992
+          ],
+          "samplesMs": [
+            169.04459999999995,
+            227.41789999999992,
+            155.57960000000003
+          ]
+        },
+        "cached": {
+          "medianMs": 200.2014999999999,
+          "rangeMs": [
+            173.44229999999993,
+            300.5166999999999
+          ],
+          "samplesMs": [
+            200.2014999999999,
+            300.5166999999999,
+            173.44229999999993
+          ]
+        }
+      },
+      {
+        "models": 3000,
+        "refresh": {
+          "medianMs": 355.2432000000001,
+          "rangeMs": [
+            346.06679999999983,
+            462.8309999999999
+          ],
+          "samplesMs": [
+            346.06679999999983,
+            462.8309999999999,
+            355.2432000000001
+          ]
+        },
+        "cached": {
+          "medianMs": 396.2827,
+          "rangeMs": [
+            395.8783000000001,
+            460.19489999999996
+          ],
+          "samplesMs": [
+            395.8783000000001,
+            460.19489999999996,
+            396.2827
+          ]
+        }
+      },
+      {
+        "models": 5000,
+        "refresh": {
+          "medianMs": 596.0524,
+          "rangeMs": [
+            587.931,
+            646.6788999999999
+          ],
+          "samplesMs": [
+            587.931,
+            646.6788999999999,
+            596.0524
+          ]
+        },
+        "cached": {
+          "medianMs": 609.3201999999997,
+          "rangeMs": [
+            598.3833,
+            1108.0945999999994
+          ],
+          "samplesMs": [
+            609.3201999999997,
+            1108.0945999999994,
+            598.3833
+          ]
+        }
+      }
+    ],
+    "result200Sha256": "dbf7e6e087b8f6f1f08f3b87ac061552d50325100cde0e80379cb21f64d772ca"
+  },
+  "accuracy": {
+    "referenceRows": 8775,
+    "queries": 8365,
+    "mismatches": 0
+  },
+  "invalidationChecks": [
+    "Complete and identical cold/warm model list: 200",
+    "Complete and identical cold/warm model list: 1000",
+    "Complete and identical cold/warm model list: 3000",
+    "Complete and identical cold/warm model list: 5000",
+    "Reference update applies immediately even with identical file length and modification time",
+    "Explicit provider facts retain precedence and do not leak to another service",
+    "Removed reference facts clear the prior model capability"
+  ],
+  "metadataRefresh": {
+    "passed": true,
+    "includesOverlappingDirectoryFetch": true
+  },
+  "actualVSCode": {
+    "version": "1.141.2",
+    "registeredModels": 200,
+    "requests": 6,
+    "passed": true,
+    "restoreVerified": true,
+    "restartRetained": true,
+    "catalogMs": [
+      327,
+      124
+    ]
+  },
+  "published": false
+}

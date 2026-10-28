@@ -1,0 +1,121 @@
+{
+  "date": "2026-10-28",
+  "edition": "public",
+  "version": "1.0.0",
+  "commit": "89668c7e7f9d33439f9455eb986941da09d1eb79",
+  "sourceFingerprint": "df7bf37c1015477a95be2d7bef519cff78b44c62bf35e72bb677f66b9bacbe34",
+  "binarySha256": "6694a40b06bb6c5e5596ae8da5ebe906ca01f9dbcbc8d3872b2d96f1cafb713e",
+  "programmaticPassed": true,
+  "performancePassed": true,
+  "published": false,
+  "checks": {
+    "main": {
+      "checks": 287
+    },
+    "viewer": {
+      "checks": 34
+    },
+    "tray": {
+      "checks": 25
+    },
+    "backend": {
+      "suites": 104,
+      "platformSkips": 1
+    },
+    "lifecycle": {
+      "checks": 25
+    },
+    "setup": {
+      "checks": 24
+    }
+  },
+  "performance": {
+    "passed": true,
+    "gates": {
+      "nativeScenario": true,
+      "longDuration": true,
+      "exercised": true,
+      "memoryPeak": true,
+      "memoryReleased": true,
+      "handlesReleased": true,
+      "threadsReleased": true,
+      "idleCpu": true,
+      "noOrphans": true
+    },
+    "metrics": {
+      "samples": 652,
+      "liveSeconds": 3598.5022678,
+      "requests": 307,
+      "requestBytes": 23332,
+      "responseBytes": 1120000,
+      "peakTreePrivate": 903536640,
+      "peakNativePrivate": 131276800,
+      "baselineTreePrivate": 576950272,
+      "finalTreePrivate": 535220224,
+      "nativePrivateGrowth": 20967424,
+      "treeHandleGrowth": -37,
+      "nativeHandleGrowth": -2,
+      "nativeThreadGrowth": -2,
+      "finalIdleCpuOneCorePercent": 0.555052598766881,
+      "remainingProcessesAfterExit": 0
+    },
+    "latency": {
+      "cycleMs": {
+        "count": 291,
+        "medianMs": 5154.899999976158,
+        "p95Ms": 7341.100000023842,
+        "maxMs": 7672.299999952316
+      },
+      "requestMs": {
+        "count": 291,
+        "medianMs": 164.89999997615814,
+        "p95Ms": 261.2999999523163,
+        "maxMs": 473.7000000476837
+      },
+      "viewerMs": {
+        "count": 291,
+        "medianMs": 4699.799999952316,
+        "p95Ms": 6877.5,
+        "maxMs": 7162.100000023842
+      }
+    },
+    "operations": {
+      "comparisons": 1164,
+      "cycles": 291,
+      "detailReads": 1164,
+      "managerHides": 59,
+      "navigation": 873,
+      "requests": 307,
+      "viewerChecks": 1455
+    },
+    "provenance": {
+      "commit": "89668c7e7f9d33439f9455eb986941da09d1eb79",
+      "sourceFingerprint": "df7bf37c1015477a95be2d7bef519cff78b44c62bf35e72bb677f66b9bacbe34",
+      "binarySha256": "6694a40b06bb6c5e5596ae8da5ebe906ca01f9dbcbc8d3872b2d96f1cafb713e",
+      "isolated": true,
+      "buildMode": "manual-acceptance"
+    },
+    "scope": "Windows native host plus all descendant WebView/GPU processes; isolated configuration and synthetic 1 MiB responses; real upstream and other platforms separate"
+  },
+  "historicalIntegrity": {
+    "passed": true,
+    "initialSessions": 20,
+    "retainedInitialSessions": 20,
+    "finalSessions": 21,
+    "jsonlFilesChecked": 20,
+    "jsonlBytesChecked": 656588116,
+    "originalJsonlUnchanged": true,
+    "scope": "Original session IDs/counts and streaming SHA-256 of original JSONL files; the mutable content database is intentionally not compared byte-for-byte"
+  },
+  "ci": {
+    "commit": "195e3c30898e3379eb72a3f06d69963112427cdf",
+    "url": "https://github.com/Damue01/XwX_Deck/actions/runs/40577890569",
+    "passed": true,
+    "scope": "Source and native Windows/Apple Silicon/Intel checks; subsequent test-only viewport calibration, not a new Windows soak artifact"
+  },
+  "boundaries": [
+    "Windows native programmatic checks and synthetic local upstream; physical mouse input is blocked by Windows desktop protection.",
+    "No Mac long-duration acceptance or real-provider/account certification is claimed.",
+    "Published v1.0.0 and v1.0.1 are retained; public release version decision remains pending."
+  ]
+}

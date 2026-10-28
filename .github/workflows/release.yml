@@ -1,0 +1,388 @@
+name: Build desktop packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Candidate packages to build
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - windows-x64
+          - macos-arm64
+          - macos-x64
+      verify_build_run_id:
+        description: Verify official Windows clients against an existing successful package run
+        required: false
+        type: string
+      use_cached_windows_binary:
+        description: Verify the exact cached executable when package UI acceptance is still incomplete
+        required: false
+        type: boolean
+        default: false
+      recover_windows_run_id:
+        description: Resume exact Windows binary acceptance with unchanged compiled sources
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*.*.*"
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}${{ inputs.verify_build_run_id && '-client-acceptance' || inputs.recover_windows_run_id && '-profile-recovery' || '' }}
+  cancel-in-progress: false
+
+jobs:
+  recover-windows-package:
+    if: github.event_name == 'workflow_dispatch' && inputs.recover_windows_run_id != ''
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/windows-package-recovery.yml
+    with:
+      prior_run_id: ${{ inputs.recover_windows_run_id }}
+
+  packaged-windows-clients:
+    if: github.event_name == 'workflow_dispatch' && inputs.verify_build_run_id != ''
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/installed-client-acceptance.yml
+    with:
+      build_run_id: ${{ inputs.verify_build_run_id }}
+      use_cached_binary: ${{ inputs.use_cached_windows_binary || false }}
+
+  validate:
+    if: ${{ !inputs.verify_build_run_id && !inputs.recover_windows_run_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Run full release source checks
+        if: github.event_name == 'push'
+        run: npm test
+
+      - name: Validate source
+        run: |
+          npm run compile
+          npm run test:built
+          npm run check:test-plan
+          npm run docs:build
+          npm run check:public-boundary
+          npm run check:workflows
+
+      - name: Validate tag and package version
+        if: github.event_name == 'push'
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="${GITHUB_REF_NAME:-v$VERSION}"
+          if [[ "$TAG" != "v$VERSION" ]]; then
+            echo "Tag $TAG does not match package version $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  windows:
+    if: github.event_name == 'push' || inputs.target == 'all' || inputs.target == 'windows-x64'
+    name: Windows x64
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_TARGET_DIR: test-results/native-target
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ runner.os }}-${{ runner.arch }}-native-rust-v3-${{ hashFiles('src-native/Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-native-rust-v3-${{ hashFiles('src-native/Cargo.lock') }}-
+            ${{ runner.os }}-${{ runner.arch }}-native-rust-
+
+      - name: Build Windows per-user Setup and portable package
+        run: npm run build:win
+
+      - name: Verify Windows Rust unit tests
+        run: cargo test --locked --features manual-acceptance --manifest-path src-native/Cargo.toml
+
+      - name: Save compiled Rust dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+
+      - name: Verify native backend and update integrity
+        run: npm run test:rust:backend
+
+      - name: Verify isolated native UI
+        shell: pwsh
+        run: |
+          ./tools/native/ensure-windows-webview2.ps1
+          node tools/native/native-test.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify per-user Setup installation, upgrade and uninstall
+        shell: pwsh
+        run: |
+          node tools/native/windows-setup-fixture.mjs --output=test-results/setup-old-debug.exe
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node tools/native/windows-setup-test.mjs --old-binary=test-results/setup-old-debug.exe --new-binary="release/XwX Deck.exe" --new-setup="release/XwX Deck Setup.exe"
+
+      - name: Upload Windows verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-verification
+          path: |
+            test-results/*.json
+            test-results/*.log
+            test-results/windows-setup-acceptance-*/summary.json
+            test-results/windows-setup-acceptance-*/recovery-diagnostics.json
+            test-results/windows-setup-acceptance-*/*.log
+            release/native-build-report.json
+          if-no-files-found: warn
+
+      - name: Prepare Windows assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-upload | Out-Null
+          Copy-Item "release/XwX Deck.exe" "release-upload/XwX-Deck-windows-x64.exe"
+          Copy-Item "release/XwX Deck Setup.exe" "release-upload/XwX-Deck-windows-x64-setup.exe"
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: release-upload/*
+          if-no-files-found: error
+
+  macos:
+    if: github.event_name == 'push' || inputs.target != 'windows-x64'
+    name: macOS ${{ matrix.arch }}
+    needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.target == 'macos-arm64' && '[{"os":"macos-15","arch":"arm64"}]' || inputs.target == 'macos-x64' && '[{"os":"macos-15-intel","arch":"x64"}]' || '[{"os":"macos-15","arch":"arm64"},{"os":"macos-15-intel","arch":"x64"}]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      CARGO_TARGET_DIR: test-results/native-target
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ runner.os }}-${{ runner.arch }}-native-rust-v3-${{ hashFiles('src-native/Cargo.lock') }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-native-rust-v3-${{ hashFiles('src-native/Cargo.lock') }}-
+            ${{ runner.os }}-${{ runner.arch }}-native-rust-
+
+      - name: Build macOS candidate
+        run: npm run build:mac:${{ matrix.arch }}
+
+      - name: Verify macOS Rust unit tests
+        run: cargo test --locked --features manual-acceptance --manifest-path src-native/Cargo.toml
+
+      - name: Save compiled Rust dependencies
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+
+      - name: Verify native backend and update integrity
+        run: npm run test:rust:backend
+
+      - name: Verify production WebKit interactions in an isolated root
+        env:
+          XWX_NATIVE_TEST_BINARY: ./release-native/XwX Deck.app/Contents/MacOS/xwx-deck-native
+        run: node tools/native/native-test.mjs
+
+      - name: Upload macOS verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-verification
+          path: |
+            test-results/native-*-summary.json
+            release-native/native-build-report.json
+          if-no-files-found: warn
+
+      - name: Prepare macOS assets
+        shell: bash
+        run: |
+          mkdir -p release-upload
+          cp "release-native/XwX-Deck-mac-${{ matrix.arch }}.dmg" release-upload/
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: release-upload/*
+          if-no-files-found: error
+
+  verify-built-windows-clients:
+    if: ${{ always() && needs.windows.result == 'success' }}
+    needs: windows
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/installed-client-acceptance.yml
+    with:
+      build_run_id: ${{ github.run_id }}
+
+  release-draft:
+    if: github.event_name == 'push'
+    name: Assemble draft release
+    needs:
+      - validate
+      - windows
+      - macos
+      - verify-built-windows-clients
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+          pattern: '*-x64'
+
+      - name: Download macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-arm64
+          path: release-assets
+
+      - name: Generate update manifests and checksums
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node tools/release/write-release-manifest.mjs release-assets
+
+      - name: Generate build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release-assets/*
+
+      - name: Create or update draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.validate.outputs.tag }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -qx true; then
+            gh release upload "$TAG" release-assets/* --clobber
+          elif gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists and is not a draft." >&2
+            exit 1
+          else
+            gh release create "$TAG" \
+              --draft \
+              --generate-notes \
+              --title "XwX Deck $VERSION" \
+              --notes-file release-assets/release-notes.md \
+              release-assets/*
+          fi
+          echo "Draft release is ready. Review platform packages before publishing it in GitHub."

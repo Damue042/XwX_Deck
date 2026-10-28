@@ -1,0 +1,85 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { build } from 'esbuild';
+import { canonicalOfficialModelId, expandProtocolTable, normalizeProtocolTable, mergeOfficialModels } from '../build/official-models.mjs';
+
+const root = resolve(import.meta.dirname, '../..');
+const routingCases = JSON.parse(await readFile(resolve(root, 'src/shared/protocol-routing-cases.json'), 'utf8'));
+const routingBundle = await build({ entryPoints: [resolve(root, 'src/shared/codex-protocol-policy.ts')], bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent' });
+const { resolveCatalogCodexProtocol, resolveClaudeModelProtocol } = await import('data:text/javascript;base64,' + Buffer.from(routingBundle.outputFiles[0].text).toString('base64'));
+for (const item of routingCases) {
+  // Catalog order is not a routing preference. Both clients must agree with Rust.
+  for (const protocols of [item.protocols, [...item.protocols].reverse()]) {
+    const entry = { id: item.name, vendor: 'fixture', protocols, protocolsDeclared: true, clients: ['codex', 'claude'] };
+    assert.equal(resolveCatalogCodexProtocol(entry), item.codex, item.name);
+    assert.equal(resolveClaudeModelProtocol({ adapter: 'auto' }, entry), item.claude, item.name);
+  }
+}
+console.log(`PASS ${routingCases.length} shared protocol combinations: client-native priority, Responses before Chat, directory-order independence`);
+const table = JSON.parse(await readFile(resolve(root, 'assets/model-protocols.json'), 'utf8'));
+const modelsDev = JSON.parse(await readFile(resolve(root, 'assets/models-dev-capabilities.json'), 'utf8'));
+const normalized = normalizeProtocolTable(table);
+assert.equal(normalized.models.length, 48);
+assert.ok(normalized.providerDefaults.length >= 30);
+assert.ok(normalized.modelRules.length >= 15);
+const protocols = id => normalized.models.find(row => row.modelId === id)?.protocols ?? [];
+assert.deepEqual(protocols('qwen3.8-max'), ['openai-responses', 'chat-completions', 'anthropic-messages']);
+assert.deepEqual(protocols('qwen3-coder-plus'), ['chat-completions']);
+assert.deepEqual(protocols('qwen3.8-omni-flash'), ['openai-responses', 'chat-completions']);
+assert.deepEqual(protocols('kimi-k2.7-code'), ['chat-completions', 'anthropic-messages']);
+assert.deepEqual(protocols('MiniMax-M3'), ['openai-responses', 'chat-completions', 'anthropic-messages']);
+assert.equal(canonicalOfficialModelId('qwen3.7-max-2026-05-20'), canonicalOfficialModelId('qwen3.7-max'));
+assert.equal(canonicalOfficialModelId('deepseek-v4-pro-ga-260813'), canonicalOfficialModelId('deepseek-v4-pro'));
+
+const expanded = expandProtocolTable(table, modelsDev.catalog);
+assert.ok(expanded.models.length > 400, 'provider defaults must expand to the current catalog');
+const generated = id => expanded.models.find(row => row.modelId === id)?.protocols ?? [];
+assert.deepEqual(generated('gpt-4o'), ['openai-responses', 'chat-completions']);
+assert.deepEqual(generated('gpt-3.5-turbo'), ['chat-completions']);
+assert.deepEqual(generated('claude-opus-4-7'), ['anthropic-messages']);
+assert.deepEqual(generated('mistral-large-4'), ['chat-completions']);
+assert.deepEqual(generated('anthropic/claude-opus-4.7'), ['chat-completions', 'anthropic-messages']);
+assert.deepEqual(generated('openai/gpt-5.5'), ['openai-responses', 'chat-completions']);
+
+const existing = {
+  modelId: 'deepseek-flash',
+  vendor: 'DeepSeek',
+  verifiedAt: '2026-01-01',
+  sources: [],
+  capability: { contextWindow: 999, reasoning: true },
+  protocols: ['chat-completions'],
+  claudeOneMillionRoles: [],
+  codexRecommendedProtocol: 'chat-completions'
+};
+const merged = mergeOfficialModels([existing], expanded);
+const flash = merged.find(row => row.modelId === 'deepseek-flash');
+assert.deepEqual(flash.protocols, ['openai-responses', 'chat-completions', 'anthropic-messages']);
+assert.equal(flash.capability.contextWindow, 999, 'existing curated capability must win');
+assert.ok(flash.sources.length > 0, 'official source links must be retained');
+assert.ok(merged.some(row => row.modelId === 'qwen3.8-max' && row.capability.contextWindow === 1_000_000));
+const existingK26 = {
+  modelId: 'kimi-k2.6',
+  vendor: 'Kimi',
+  verifiedAt: '2026-01-01',
+  sources: [],
+  capability: { inputModalities: ['text', 'image'] },
+  protocols: ['chat-completions', 'anthropic-messages'],
+  claudeOneMillionRoles: [],
+  codexRecommendedProtocol: 'chat-completions'
+};
+const mergedK26 = mergeOfficialModels([existingK26], table).find(row => row.modelId === 'kimi-k2.6');
+assert.deepEqual(mergedK26.capability.inputModalities, ['text', 'image', 'video'], 'modalities union must fill a missing video capability');
+
+assert.throws(() => normalizeProtocolTable({ ...table, models: [{ ...table.models[0], protocols: ['invented'] }] }), /unknown protocol/);
+assert.throws(() => normalizeProtocolTable({
+  ...table,
+  sources: { ...table.sources, bad: { label: 'bad', url: 'https://example.com/model' } },
+  models: [{ ...table.models[0], sourceIds: ['bad'] }]
+}), /approved official documentation host/);
+assert.throws(() => normalizeProtocolTable({
+  ...table,
+  models: [table.models[0], { ...table.models[0], modelId: table.models[0].modelId.toUpperCase() }]
+}), /duplicate canonical model identity/);
+
+console.log('PASS model protocol table: 48 verified rows, provider expansion, explicit protocols, source allowlist, merge precedence and duplicate rejection');
