@@ -340,6 +340,7 @@ impl Pilot {
         }
         // Restore all original Desktop fields before archiving its ownership ledger.
         self.stop().await?;
+        self.restore_vscode_direct()?;
         self.desktop_restore()?;
         let mut keep = vec![
             self.codex_home(),

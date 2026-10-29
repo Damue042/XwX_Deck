@@ -10,7 +10,10 @@ use std::{
 };
 use windows::{
     System::Launcher,
-    Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_SINGLETHREADED},
+    Win32::{
+        System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_SINGLETHREADED},
+        UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems},
+    },
 };
 use windows_core::HSTRING;
 
@@ -53,6 +56,46 @@ fn completed(result: windows_core::Result<bool>) -> Result<()> {
 pub fn reveal(file: &Path) -> Result<()> {
     let file = fs::canonicalize(file).map_err(|error| format!("无法访问日志文件：{error}"))?;
     open_folder(file.parent().ok_or("日志目录无效")?)
+}
+
+fn select_shell_item(path: &Path) -> Result<()> {
+    let item = unsafe { ILCreateFromPathW(&shell_path(path)) };
+    if item.is_null() {
+        return Err("Windows 无法识别备份位置".into());
+    }
+    // With no child list, the absolute item identifies what to select in its parent.
+    let result = unsafe { SHOpenFolderAndSelectItems(item, None, 0) };
+    unsafe { ILFree(Some(item)) };
+    result.map_err(|error| format!("Windows 无法选中备份：{error}"))
+}
+
+/// A false result means only the parent opened; callers must show the exact backup path.
+pub fn select_backup(path: &Path) -> Result<bool> {
+    let path = fs::canonicalize(path).map_err(|error| format!("无法访问备份：{error}"))?;
+    let folder = path.parent().ok_or("备份目录无效")?.to_path_buf();
+    let (sender, receiver) = mpsc::channel();
+    if let Some(app) = APPLICATION.get() {
+        app.run_on_main_thread(move || {
+            let _ = sender.send(select_shell_item(&path));
+        })
+        .map_err(|error| format!("无法提交备份定位请求：{error}"))?;
+    } else {
+        std::thread::spawn(move || {
+            let result = unsafe { RoInitialize(RO_INIT_SINGLETHREADED) }
+                .map_err(|error| error.to_string())
+                .and_then(|_| {
+                    let result = select_shell_item(&path);
+                    unsafe { RoUninitialize() };
+                    result
+                });
+            let _ = sender.send(result);
+        });
+    }
+    if receiver.recv_timeout(Duration::from_secs(30)).is_ok_and(|result| result.is_ok()) {
+        return Ok(true);
+    }
+    open_folder(&folder)?;
+    Ok(false)
 }
 
 pub fn open_folder(folder: &Path) -> Result<()> {

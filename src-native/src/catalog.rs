@@ -24,7 +24,7 @@ fn codex_window(entry: &Value, native: Option<&Value>) -> u64 {
     let capacity = entry["contextWindow"]
         .as_u64()
         .filter(|n| *n > 0 && entry["capabilitySources"]["contextWindow"] != "fallback");
-    let recommended = entry["providerCapabilities"]["recommendedContextWindow"]
+    let recommended = entry["recommendedContextWindow"]
         .as_u64()
         .filter(|n| *n > 0);
     let live = entry["nativeCodexContextWindow"]
@@ -340,11 +340,13 @@ fn enrich_with_capabilities(mut entry: Value, remote: &Value, models: Value) -> 
     }
     let id = text(&entry, "id").to_owned();
     let official = official_entry(&id, false).cloned().unwrap_or(Value::Null);
-    let provider = entry["providerCapabilities"].clone();
+    // Relay directories determine availability and endpoints. Their raw
+    // capabilities remain audit/filter data, never client capability defaults.
+    let native = entry["nativeCapabilities"].clone();
+    let candidates = [("models.dev", &models), ("codex", &native)];
     let mut sources = serde_json::Map::new();
     let mut missing = vec![];
     for key in FIELDS {
-        let candidates = [("provider", &provider), ("models.dev", &models)];
         let cached_source = entry["capabilitySources"][*key]
             .as_str()
             .unwrap_or("")
@@ -382,22 +384,25 @@ fn enrich_with_capabilities(mut entry: Value, remote: &Value, models: Value) -> 
                 "contextWindow" => json!(262144),
                 "maxOutputTokens" => json!(8192),
                 "toolCalling" => json!(true),
-                "inputModalities" => json!(["text"]),
+                "vision" | "inputModalities" => Value::Null,
                 _ => json!(false),
             };
             sources.insert((*key).into(), json!("fallback"));
             missing.push(*key);
+            if ["vision", "inputModalities"].contains(key) {
+                entry.as_object_mut().unwrap().remove(*key);
+            }
         }
     }
     let vision = entry["vision"] == true;
-    if let Some(modalities) = entry["inputModalities"].as_array_mut() {
-        if sources["inputModalities"] != "provider"
-            && vision
+    let text_only = entry["vision"] == false;
+    if let Some(modalities) = entry.get_mut("inputModalities").and_then(Value::as_array_mut) {
+        if vision
             && !modalities.iter().any(|v| v == "image")
         {
             modalities.push(json!("image"));
         }
-        if sources["inputModalities"] != "provider" && !vision {
+        if text_only {
             modalities.retain(|v| ![json!("image"), json!("pdf"), json!("video")].contains(v));
         }
         if modalities.is_empty() {
@@ -405,19 +410,26 @@ fn enrich_with_capabilities(mut entry: Value, remote: &Value, models: Value) -> 
         }
     }
     if sources["inputModalities"] == "fallback" && vision {
+        entry["inputModalities"] = json!(["text", "image"]);
         sources.insert("inputModalities".into(), sources["vision"].clone());
+        missing.retain(|key| *key != "inputModalities");
     }
     // Optional facts keep their source and stay absent when unconfirmed.
     for key in [
         "maxInputTokens",
+        "recommendedContextWindow",
         "outputModalities",
         "temperature",
         "reasoningOptions",
         "interleavedField",
         "maxReasoningTokens",
+        "adaptiveThinking",
+        "minThinkingBudget",
+        "maxThinkingBudget",
+        "streaming",
     ] {
         entry.as_object_mut().unwrap().remove(key);
-        if let Some((source, value)) = [("provider", &provider), ("models.dev", &models)]
+        if let Some((source, value)) = candidates
             .into_iter()
             .find_map(|(source, cap)| cap.get(key).map(|value| (source, value)))
         {
@@ -437,7 +449,7 @@ fn enrich_with_capabilities(mut entry: Value, remote: &Value, models: Value) -> 
         if entry["reasoning"] != true {
             continue;
         }
-        if let Some((source, value)) = [("provider", &provider), ("models.dev", &models)]
+        if let Some((source, value)) = candidates
             .into_iter()
             .find_map(|(source, capability)| capability.get(key).map(|value| (source, value)))
         {
@@ -544,6 +556,7 @@ pub(super) struct Catalog {
     pub codex_home: PathBuf,
     pub imported: Value,
     pub selected: String,
+    pub trace_enabled: bool,
     pub defer_publication: bool,
 }
 impl Catalog {
@@ -560,12 +573,13 @@ impl Catalog {
             entry["codexContextWindow"] = json!(codex_window(entry, exact));
             entry["codexCompatibility"] =
                 compatibility::resolve(entry, exact, &entry_wire(p, Some(entry), "responses"));
-            entry["codexContextWindowSource"] = json!(if entry["providerCapabilities"]
-                ["recommendedContextWindow"]
+            entry["codexContextWindowSource"] = json!(if entry["recommendedContextWindow"]
                 .as_u64()
                 .is_some_and(|n| n > 0)
             {
-                "provider"
+                entry["capabilitySources"]["recommendedContextWindow"]
+                    .as_str()
+                    .unwrap_or("models.dev")
             } else if entry["nativeCodexContextWindow"]
                 .as_u64()
                 .is_some_and(|n| n > 0)
@@ -598,26 +612,32 @@ impl Catalog {
     }
     pub(super) fn local_catalog(&self, p: &Provider) -> Result<Value> {
         let path = self.cache_path(p);
+        let remote = model_metadata::cached_capabilities(&self.root)?;
         if let Some(source) = read(&path)? {
             let cached: Value = serde_json::from_str(&source)
                 .map_err(|_| "模型缓存损坏，原文件已保留".to_string())?;
             if cached["connectionId"] == identity(p) && cached["adapter"] == p.adapter {
-                return super::retired_models::overlay(&self.root, p, cached["entries"].clone());
+                let entries = cached["entries"].as_array().cloned().ok_or("模型缓存目录格式无效")?;
+                let entries = self.client_defaults(p, enrich_models(entries, &remote));
+                return super::retired_models::overlay(&self.root, p, json!(entries));
             }
         }
         if let Some(cached) = extension::cached_catalog(&self.root, p)? {
-            return Ok(cached);
+            let entries = cached.as_array().cloned().ok_or("模型目录格式无效")?;
+            let entries = self.client_defaults(p, enrich_models(entries, &remote));
+            return Ok(json!(entries));
         }
         let imported = self.imported.get(&p.id).and_then(Value::as_array);
-        super::retired_models::overlay(&self.root, p, json!(imported.into_iter().flatten().filter_map(Value::as_str).map(|id|json!({"id":id,"vendor":"导入配置","catalogEndpoints":[],"protocols":[if p.codex_api_format=="responses"{"openai-responses"}else{&p.codex_api_format}],"protocolsDeclared":false})).collect::<Vec<_>>()))
+        let entries = imported.into_iter().flatten().filter_map(Value::as_str).map(|id|json!({"id":id,"vendor":"导入配置","catalogEndpoints":[],"protocols":[if p.codex_api_format=="responses"{"openai-responses"}else{&p.codex_api_format}],"protocolsDeclared":false}));
+        let entries = self.client_defaults(p, enrich_models(entries, &remote));
+        super::retired_models::overlay(&self.root, p, json!(entries))
     }
     pub(super) async fn connection_catalog(&self, p: &Provider, network: bool) -> Result<Value> {
         let cached = self.local_catalog(p)?;
         let remote = model_metadata::cached_capabilities(&self.root)?;
         if !network && cached.as_array().is_some_and(|a| !a.is_empty()) {
-            let entries = enrich_models(cached.as_array().unwrap().iter().cloned(), &remote);
-            let entries = self.client_defaults(p, entries);
-            self.publish_catalog(p, &entries)?;
+            let entries = cached.as_array().unwrap();
+            self.publish_catalog(p, entries)?;
             return Ok(json!(entries));
         }
         let client = reqwest::Client::builder()
@@ -684,11 +704,16 @@ impl Catalog {
         }
         write(&self.cache_path(p),&json!({"version":3,"connectionId":identity(p),"baseUrl":p.base_url,"adapter":p.adapter,"entries":entries}).to_string())?;
         if self.selected == p.id {
-            self.publish_codex_catalog(p, entries)?;
+            self.publish_codex_catalog(p, entries, self.trace_enabled)?;
         }
         Ok(())
     }
-    pub(super) fn publish_codex_catalog(&self, p: &Provider, entries: &[Value]) -> Result<()> {
+    pub(super) fn publish_codex_catalog(
+        &self,
+        p: &Provider,
+        entries: &[Value],
+        trace_enabled: bool,
+    ) -> Result<()> {
         let mut rows = entries.to_vec();
         if !p.codex_model.is_empty() && !rows.iter().any(|r| r["id"] == p.codex_model) {
             let remote = model_metadata::cached_capabilities(&self.root)?;
@@ -702,7 +727,9 @@ impl Catalog {
         let native = read(&self.codex_home.join("models_cache.json"))?
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .unwrap_or(Value::Null);
-        let models=rows.iter().enumerate().filter(|(_,r)|!metadata::unavailable(r)&&!metadata::non_conversational(r)&&!r["catalogEndpoints"].as_array().is_some_and(|a|a.len()==1&&a[0]=="gemini")).map(|(i,r)|{
+        let models=rows.iter().enumerate().filter(|(_,r)|!metadata::unavailable(r)&&!metadata::non_conversational(r)&&!r["catalogEndpoints"].as_array().is_some_and(|a|a.len()==1&&a[0]=="gemini"))
+        .filter(|(_, r)| trace_enabled || matches!(model_wire(p, Some(r), "responses").as_str(), "responses" | "openai-responses"))
+        .map(|(i,r)|{
             let exact=native["models"].as_array().and_then(|a|a.iter().find(|e|e["slug"]==r["id"]));
             let context=codex_window(r, exact);let vision=if r["capabilitySources"]["vision"]=="fallback"{exact.is_some_and(|e|e["supports_image_detail_original"]==true)}else{r["vision"]==true};
             let mut row=exact.cloned().unwrap_or_else(||json!({"shell_type":"shell_command","base_instructions":"You are a coding agent. Follow the user instructions, use the provided tools carefully, and report the completed result clearly.","apply_patch_tool_type":"freeform","default_verbosity":"medium","truncation_policy":{"mode":"tokens","limit":10000},"experimental_supported_tools":[]}));
@@ -755,6 +782,7 @@ impl Pilot {
                 .unwrap_or("")
                 .into(),
             defer_publication: false,
+            trace_enabled: self.active(),
         }
     }
     pub(super) fn local_catalog(&self, p: &Provider) -> Result<Value> {
@@ -763,8 +791,14 @@ impl Pilot {
     pub(super) async fn connection_catalog(&self, p: &Provider, network: bool) -> Result<Value> {
         self.catalog_context().connection_catalog(p, network).await
     }
-    pub(super) fn publish_codex_catalog(&self, p: &Provider, entries: &[Value]) -> Result<()> {
-        self.catalog_context().publish_codex_catalog(p, entries)
+    pub(super) fn publish_codex_catalog(
+        &self,
+        p: &Provider,
+        entries: &[Value],
+        trace_enabled: bool,
+    ) -> Result<()> {
+        self.catalog_context()
+            .publish_codex_catalog(p, entries, trace_enabled)
     }
     pub fn catalog_job(&self, method: &str, args: &[Value]) -> Result<Option<CatalogJob>> {
         let input = args.first().cloned().unwrap_or(Value::Null);
@@ -859,6 +893,8 @@ impl Pilot {
             current,
             entries.as_array().map(Vec::as_slice).unwrap_or(&[]),
         )?;
+        let vscode_selected = self.settings.other.get("clientRoutes").and_then(|routes| routes.get("vscode"))
+            .is_some_and(|route| route["providerId"] == current.id);
         // Endpoint changes update generated direct configuration only while
         // Trace is inactive. Each writer preserves external edits and the
         // user's selected service/model remains in the application registry.
@@ -869,6 +905,9 @@ impl Pilot {
             if self.settings.selected["claude"] == current.id {
                 self.write_claude_direct(false)?;
                 self.refresh_desktop_selection()?;
+            }
+            if vscode_selected {
+                self.write_vscode_direct(false)?;
             }
         }
         Ok(entries)
@@ -926,7 +965,7 @@ fn cached_entry(root: &Path, p: &Provider, model: &str) -> Option<Value> {
 
 pub(super) fn output_limit(root: &Path, p: &Provider, model: &str) -> Option<u64> {
     let entry = cached_entry(root, p, model)?;
-    if !["provider", "models.dev"]
+    if !["codex", "models.dev"]
         .contains(&entry["capabilitySources"]["maxOutputTokens"].as_str()?)
     {
         return None;
@@ -969,9 +1008,6 @@ fn entry_wire(p: &Provider, entry: Option<&Value>, incoming: &str) -> String {
     };
     if let Some(e) = entry {
         if e["protocolsDeclared"] != true {
-            if let Some(wire) = extension::catalog_wire(p, e, incoming, default) {
-                return wire;
-            }
             if e["catalogEndpoints"].as_array().is_some_and(|a| {
                 !a.is_empty()
                     && !a.iter().any(|v| v == "openai")
@@ -988,6 +1024,16 @@ fn entry_wire(p: &Provider, entry: Option<&Value>, incoming: &str) -> String {
             .into();
     }
     default.into()
+}
+
+// Explicit adapters and automatic per-model routing follow the same rule as
+// resolve_wire. Use the supplied catalog row so publication never reads a stale cache.
+fn model_wire(p: &Provider, entry: Option<&Value>, incoming: &str) -> String {
+    if p.adapter == "auto" || extension::automatic_adapter(&p.adapter) {
+        entry_wire(p, entry, incoming)
+    } else {
+        p.adapter.clone()
+    }
 }
 
 #[cfg(test)]
@@ -1431,7 +1477,7 @@ mod client_contract_tests {
         );
         assert_eq!(
             explicit["capabilitySources"]["reasoningLevels"],
-            json!("provider")
+            Value::Null
         );
         assert_eq!(
             codex_reasoning_levels(&explicit, &provider),
@@ -1477,11 +1523,11 @@ mod client_contract_tests {
             "provider-{}-models.json",
             &storage::digest(provider.id.as_bytes())[..24]
         ));
-        for source in ["fallback", "provider", "models.dev"] {
+        for source in ["fallback", "provider", "codex", "models.dev"] {
             write(&file, &json!({"connectionId":identity(&provider),"entries":[{"id":"model","maxOutputTokens":4096,"capabilitySources":{"maxOutputTokens":source}}]}).to_string()).unwrap();
             assert_eq!(
                 output_limit(&root, &provider, "model"),
-                if source == "fallback" {
+                if ["fallback", "provider"].contains(&source) {
                     None
                 } else {
                     Some(4096)
@@ -1512,7 +1558,7 @@ mod client_contract_tests {
             500000
         );
         assert_eq!(codex_window(&entry, None), 1050000);
-        let recommended = json!({"id":"gpt-6.1-sol","contextWindow":1050000,"capabilitySources":{"contextWindow":"provider"},"providerCapabilities":{"recommendedContextWindow":600000}});
+        let recommended = json!({"id":"gpt-6.1-sol","contextWindow":1050000,"capabilitySources":{"contextWindow":"models.dev"},"recommendedContextWindow":600000});
         assert_eq!(
             codex_window(&recommended, Some(&json!({"context_window":500000}))),
             600000
@@ -1530,5 +1576,42 @@ mod client_contract_tests {
             500000
         );
         assert_eq!(codex_window(&unknown, None), 262144);
+    }
+
+    #[test]
+    fn references_control_capabilities_and_relays_only_filter() {
+        let reference = json!({"contextWindow":1050000,"maxOutputTokens":128000,
+            "maxInputTokens":922000,"vision":true,"inputModalities":["text","image","pdf"],
+            "outputModalities":["text"],"reasoning":true,"levels":["low","high","max"],
+            "defaultLevel":"high","toolCalling":true,"structuredOutput":true,"temperature":false});
+        let raw = json!({"contextWindow":1000,"maxOutputTokens":100,"maxInputTokens":100,
+            "recommendedContextWindow":500,"vision":false,"inputModalities":["text"],
+            "outputModalities":["text"],"reasoning":false,"levels":[],"defaultLevel":"none",
+            "toolCalling":false,"structuredOutput":false,"temperature":true});
+        let entry = json!({"id":"exact-model","protocols":["openai-responses"],
+            "protocolsDeclared":true,"providerCapabilities":raw});
+        let resolved = enrich_with_capabilities(entry.clone(), &Value::Null, reference);
+        assert_eq!(resolved["contextWindow"], 1050000);
+        assert_eq!(resolved["maxInputTokens"], 922000);
+        assert_eq!(resolved["maxOutputTokens"], 128000);
+        assert_eq!(resolved["vision"], true);
+        assert_eq!(resolved["inputModalities"], json!(["text","image","pdf"]));
+        assert_eq!(resolved["reasoningLevels"], json!(["low","high","max"]));
+        assert_eq!(resolved["temperature"], false);
+        assert_eq!(resolved["capabilitySources"]["vision"], "models.dev");
+        assert!(resolved.get("recommendedContextWindow").is_none());
+        assert_eq!(resolved["providerCapabilities"], raw);
+        assert_eq!(resolved["id"], "exact-model");
+        assert_eq!(resolved["protocols"], json!(["openai-responses"]));
+        let empty = enrich_with_capabilities(entry.clone(), &Value::Null,
+            json!({"vision":false,"inputModalities":["text"],"reasoning":true,"levels":[],"toolCalling":false}));
+        assert_eq!(empty["vision"], false);
+        assert_eq!(empty["toolCalling"], false);
+        assert_eq!(empty["reasoningLevels"], json!([]));
+        let unknown = enrich_with_capabilities(entry, &json!({"modelsDev":[]}), json!({}));
+        assert!(unknown.get("vision").is_none());
+        assert!(unknown.get("inputModalities").is_none());
+        assert!(unknown.get("reasoningLevels").is_none());
+        assert!(unknown["missingCapabilities"].as_array().unwrap().contains(&json!("vision")));
     }
 }

@@ -21,6 +21,7 @@ const requiredArch = process.argv.find(a=>a.startsWith("--require-arch="))?.spli
 if (requiredArch && process.arch !== requiredArch) throw new Error(`Build requires a native ${requiredArch} host.`);
 const isolated = process.argv.includes('--pilot');
 const acceptance = process.argv.includes('--acceptance');
+const skipTests = process.argv.includes('--skip-tests');
 const signed = process.argv.includes('--signed');
 if (signed && process.platform !== 'darwin') throw Error('--signed requires macOS.');
 if (isolated && acceptance) throw Error('隔离验证和正常安装验收是不同的构建模式，不能同时启用。');
@@ -52,7 +53,7 @@ function run(command, args) {
   if (result.status) process.exit(result.status);
 }
 run(process.execPath, [resolve(pilot, 'prepare.mjs')]);
-run(process.execPath, [resolve(pilot, 'shared-fonts-test.mjs')]);
+if (!skipTests) run(process.execPath, [resolve(pilot, 'shared-fonts-test.mjs')]);
 const metadataRun=spawnSync(cargo,['metadata','--locked','--format-version','1','--filter-platform',process.platform==='win32'?'x86_64-pc-windows-msvc':process.arch==='arm64'?'aarch64-apple-darwin':'x86_64-apple-darwin','--manifest-path',resolve(root,'src-native/Cargo.toml')],{cwd:root,env,encoding:'utf8',maxBuffer:32*1024*1024});
 if(metadataRun.status) throw new Error(metadataRun.stderr);
 const metadata=JSON.parse(metadataRun.stdout);const resolved=new Set(metadata.resolve.nodes.map(n=>n.id));const licenseTexts=await Promise.all(['LICENSE','NOTICE',editionBuild.noticesFile,'docs/licenses/nsis.txt','docs/licenses/magpie-MIT.txt','docs/licenses/magpie-community-MIT.txt'].map(async name=>({label:name,text:await readFile(resolve(root,name),'utf8')})));
@@ -102,7 +103,7 @@ if (process.platform !== 'darwin') {
       embeddedFrontendSha256, embeddedAssetsSha256,
       candidate: { binary: destination, binaryBytes: bytes.length, binarySha256: createHash('sha256').update(bytes).digest('hex'), architecture: 'x86_64', bundleId: appId,
         signature: signature.stdout.trim(), integrityLabel: 'medium', externalRuntime: 'Microsoft Edge WebView2 (system installed)' },
-      installer, sizeBudget: checkNativeArtifactSize({exeBytes:bytes.length}), buildMode, productionReady: readiness.productionReady, installed: false, published: false, scope
+      installer, sizeBudget: checkNativeArtifactSize({exeBytes:bytes.length}), buildMode, testsSkipped: skipTests, productionReady: readiness.productionReady, installed: false, published: false, scope
     };
     await writeFile(resolve(destination, '..', 'native-build-report.json'), JSON.stringify(report, null, 2) + '\n');
     await writeFile(destination + '.sha256', report.candidate.binarySha256 + '  XwX Deck.exe\n');

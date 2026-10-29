@@ -167,7 +167,7 @@ fn model_group(source: &str, name: &str, replacement: Option<&Value>) -> Result<
     parsed(&content)?;
     Ok(content)
 }
-fn group_plan(path: &Path, group: Value) -> Result<Value> {
+fn group_plan(path: &Path, mut group: Value) -> Result<Value> {
     let source = read(path)?.unwrap_or("[]".into());
     let value = parsed(&source)?;
     let before = value
@@ -176,6 +176,9 @@ fn group_plan(path: &Path, group: Value) -> Result<Value> {
         .iter()
         .find(|row| row["name"] == "XwX Deck")
         .cloned();
+    if let Some(settings) = before.as_ref().and_then(|row| row.get("settings")) {
+        group["settings"] = settings.clone();
+    }
     let content = model_group(&source, "XwX Deck", Some(&group))?;
     Ok(
         json!({"file":path,"before":source,"beforeExisted":path.exists(),"content":content,"jsonGroup":true,"beforeGroup":before,"managedGroup":group}),
@@ -190,10 +193,30 @@ pub(super) fn restore_group(current: &str, plan: &Value) -> Result<String> {
     } else {
         Some(&plan["beforeGroup"])
     };
-    if group != Some(&plan["managedGroup"]) && group != before {
+    let definition = |group: &Value| {
+        let mut group = group.clone();
+        if let Some(object) = group.as_object_mut() {
+            object.remove("settings");
+        }
+        group
+    };
+    if group.map(definition) != Some(definition(&plan["managedGroup"])) && group != before {
         return Err("模型分组被外部修改，原文件与恢复证据已保留".into());
     }
-    model_group(current, "XwX Deck", before)
+    let mut restored = before.cloned();
+    if let Some(group) = group {
+        if let Some(settings) = group.get("settings").filter(|value| !value.is_null()) {
+            // Copilot owns picker preferences. Keep them in an inactive group
+            // when Trace stops so the next start can restore the same choices.
+            let restored = restored.get_or_insert_with(
+                || json!({"name":"XwX Deck","vendor":"customendpoint","models":[]}),
+            );
+            restored["settings"] = settings.clone();
+        } else if let Some(object) = restored.as_mut().and_then(Value::as_object_mut) {
+            object.remove("settings");
+        }
+    }
+    model_group(current, "XwX Deck", restored.as_ref())
 }
 
 pub(super) fn paths(pilot: &Pilot, id: &str) -> Result<Option<Vec<PathBuf>>> {
@@ -576,6 +599,83 @@ pub(super) fn restore_yaml_mapping(current: &str, plan: &Value) -> Result<String
     Ok(restored)
 }
 
+fn vscode_token_limits(model: &mut Value, entry: &Value) {
+    let positive = |value: &Value| value.as_u64().filter(|value| *value > 0);
+    let context = positive(&entry["contextWindow"]);
+    let recommended = positive(&entry["recommendedContextWindow"]);
+    let budget = match (context, recommended) {
+        (Some(context), Some(recommended)) => Some(context.min(recommended)),
+        (context, recommended) => context.or(recommended),
+    };
+    if let Some(context) = context {
+        model["contextWindow"] = json!(context);
+    }
+    let output = positive(&entry["maxOutputTokens"])
+        .map(|output| budget.map_or(output, |budget| output.min(budget)));
+    if let Some(output) = output {
+        model["maxOutputTokens"] = json!(output);
+    }
+    let input = positive(&entry["maxInputTokens"]);
+    let input = match (budget, output) {
+        (Some(budget), Some(output)) => {
+            let remaining = budget.saturating_sub(output);
+            Some(input.map_or(remaining, |input| input.min(remaining)))
+        }
+        _ => input,
+    };
+    if let Some(input) = input {
+        model["maxInputTokens"] = json!(input);
+    }
+}
+
+fn vscode_reasoning(model: &mut Value, entry: &Value, api_type: &str) {
+    if let Some(thinking) = entry["reasoning"].as_bool() {
+        model["thinking"] = json!(thinking);
+    }
+    if let Some(streaming) = entry["streaming"].as_bool() {
+        model["streaming"] = json!(streaming);
+    }
+    if entry["reasoning"] != true {
+        return;
+    }
+    if let Some(levels) = entry["reasoningLevels"].as_array() {
+        let mut efforts = vec![];
+        for level in levels.iter().filter_map(Value::as_str) {
+            let level = level.trim().to_ascii_lowercase();
+            if !level.is_empty() && !efforts.contains(&level) {
+                efforts.push(level);
+            }
+        }
+        model["supportsReasoningEffort"] = json!(efforts);
+        if !efforts.is_empty() {
+            model["reasoningEffortFormat"] = json!(api_type);
+            if let Some(default) = entry["defaultReasoningLevel"]
+                .as_str()
+                .filter(|default| efforts.iter().any(|effort| effort == *default))
+            {
+                model["defaultReasoningEffort"] = json!(default);
+            }
+        }
+    }
+    if api_type == "messages" {
+        if let Some(adaptive) = entry["adaptiveThinking"].as_bool() {
+            model["adaptiveThinking"] = json!(adaptive);
+        }
+        if let (Some(minimum), Some(maximum)) = (
+            entry["minThinkingBudget"].as_u64(),
+            entry["maxThinkingBudget"].as_u64(),
+        ) {
+            let maximum = model["maxOutputTokens"]
+                .as_u64()
+                .map_or(maximum, |output| maximum.min(output.saturating_sub(1)));
+            if minimum > 0 && minimum <= maximum {
+                model["minThinkingBudget"] = json!(minimum);
+                model["maxThinkingBudget"] = json!(maximum);
+            }
+        }
+    }
+}
+
 fn vscode_model_group(
     entries: &Value,
     selected: &str,
@@ -583,7 +683,7 @@ fn vscode_model_group(
     fallback_api: &str,
 ) -> Result<Value> {
     let mut rows = entries.as_array().cloned().unwrap_or_default();
-    if !rows.iter().any(|entry| entry["id"] == selected) {
+    if !selected.is_empty() && !rows.iter().any(|entry| entry["id"] == selected) {
         rows.insert(0, json!({"id": selected}));
     }
     let mut seen = std::collections::HashSet::new();
@@ -610,20 +710,77 @@ fn vscode_model_group(
             "toolCalling": entry["toolCalling"].as_bool().unwrap_or(true),
             "requestHeaders": {"Authorization": "Bearer xwx-deck"}
         });
-        for key in ["contextWindow", "maxInputTokens", "maxOutputTokens"] {
-            if entry[key].as_u64().is_some_and(|value| value > 0) {
-                model[key] = entry[key].clone();
-            }
-        }
+        vscode_token_limits(&mut model, &entry);
+        vscode_reasoning(&mut model, &entry, api_type);
         if let Some(vision) = entry["vision"].as_bool() {
             model["vision"] = json!(vision);
         }
         models.push(model);
     }
-    if !models.iter().any(|entry| entry["id"] == selected) {
+    if !selected.is_empty() && !models.iter().any(|entry| entry["id"] == selected) {
         return Err("所选模型不可用于 Copilot Chat，请选择可用的对话模型".into());
     }
     Ok(json!({"name": "XwX Deck", "vendor": "customendpoint", "models": models}))
+}
+
+pub(super) fn vscode_direct_plans(pilot: &Pilot, provider: &Provider) -> Result<Vec<Value>> {
+    let mut entries = pilot.local_catalog(provider)?;
+    if let Some(entries) = entries.as_array_mut() {
+        entries.retain(|entry| {
+            !entry["protocols"].as_array().is_some_and(|protocols| {
+                !protocols.is_empty()
+                    && !protocols.iter().any(|protocol| {
+                        [
+                            "responses",
+                            "openai-responses",
+                            "anthropic-messages",
+                            "messages",
+                            "chat-completions",
+                        ]
+                        .iter()
+                        .any(|supported| protocol == supported)
+                    })
+            })
+        });
+    }
+    let fallback = catalog::wire(&pilot.root, provider, None, "anthropic-messages");
+    let mut group = vscode_model_group(&entries, "", "", &fallback)?;
+    if !provider.subscription_account_id.is_empty() || provider.oauth {
+        group["models"] = json!([]);
+    } else {
+        for model in group["models"].as_array_mut().unwrap() {
+            let wire = text(model, "apiType").to_owned();
+            let base = extension::endpoint(
+                provider,
+                if wire == "messages" {
+                    "anthropic-messages"
+                } else {
+                    &wire
+                },
+            )
+            .unwrap_or_else(|| Pilot::api_root(&provider.base_url));
+            model["url"] = json!(format!(
+                "{}/{}",
+                base.trim_end_matches('/'),
+                if wire == "chat-completions" {
+                    "chat/completions"
+                } else {
+                    &wire
+                }
+            ));
+            model["requestHeaders"] =
+                json!({"Authorization": format!("Bearer {}", provider.bearer_token)});
+        }
+    }
+    pilot
+        .wiring_paths("vscode")?
+        .iter()
+        .filter(|path| {
+            path.file_name()
+                .is_some_and(|name| name == "chatLanguageModels.json")
+        })
+        .map(|path| group_plan(path, group.clone()))
+        .collect()
 }
 
 pub(super) fn plan(
@@ -868,6 +1025,105 @@ mod tests {
         assert_eq!(models[1]["toolCalling"], false);
         assert_eq!(models[1]["vision"], false);
         assert_eq!(models[2]["url"], "http://localhost/v1/chat/completions");
+    }
+
+    #[test]
+    fn vscode_publishes_declared_reasoning_with_protocol_and_default() {
+        for (protocol, api) in [
+            ("openai-responses", "responses"),
+            ("chat-completions", "chat-completions"),
+            ("anthropic-messages", "messages"),
+        ] {
+            let group = vscode_model_group(
+                &json!([{
+                    "id":"reasoning-model", "protocols":[protocol], "reasoning":true,
+                    "reasoningLevels":["low","high","max"], "defaultReasoningLevel":"high",
+                    "adaptiveThinking":true,"minThinkingBudget":1024,"maxThinkingBudget":20000,
+                    "maxOutputTokens":16000,"streaming":false
+                }]),
+                "reasoning-model",
+                "http://localhost/v1",
+                "responses",
+            )
+            .unwrap();
+            let model = &group["models"][0];
+            assert_eq!(model["thinking"], true);
+            assert_eq!(
+                model["supportsReasoningEffort"],
+                json!(["low", "high", "max"])
+            );
+            assert_eq!(model["defaultReasoningEffort"], "high");
+            assert_eq!(model["reasoningEffortFormat"], api);
+            assert_eq!(model["streaming"], false);
+            if api == "messages" {
+                assert_eq!(model["adaptiveThinking"], true);
+                assert_eq!(model["minThinkingBudget"], 1024);
+                assert_eq!(model["maxThinkingBudget"], 15999);
+            } else {
+                assert!(model.get("adaptiveThinking").is_none());
+                assert!(model.get("maxThinkingBudget").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn vscode_does_not_invent_reasoning_levels_or_adaptive_thinking() {
+        let group = vscode_model_group(&json!([
+            {"id":"no-reasoning","reasoning":false,"reasoningLevels":["high"]},
+            {"id":"empty-levels","reasoning":true,"reasoningLevels":[],"defaultReasoningLevel":"high"},
+            {"id":"invalid-default","reasoning":true,"reasoningLevels":["low"],"defaultReasoningLevel":"max"},
+            {"id":"unknown"}
+        ]), "unknown", "http://localhost/v1", "responses").unwrap();
+        let models = group["models"].as_array().unwrap();
+        assert_eq!(models[0]["thinking"], false);
+        assert!(models[0].get("supportsReasoningEffort").is_none());
+        assert_eq!(models[1]["supportsReasoningEffort"], json!([]));
+        assert!(models[1].get("defaultReasoningEffort").is_none());
+        assert!(models[2].get("defaultReasoningEffort").is_none());
+        assert!(models[3].get("thinking").is_none());
+        assert!(models
+            .iter()
+            .all(|model| model.get("adaptiveThinking").is_none()));
+    }
+
+    #[test]
+    fn vscode_uses_service_recommendation_without_changing_capacity_or_using_codex_default() {
+        let group = vscode_model_group(&json!([
+            {"id":"recommended","contextWindow":1000000,"maxInputTokens":1000000,"maxOutputTokens":32000,
+             "codexContextWindow":262144,"recommendedContextWindow":200000},
+            {"id":"native-limit","contextWindow":128000,"maxInputTokens":80000,"maxOutputTokens":16000},
+            {"id":"no-recommendation","contextWindow":500000,"maxOutputTokens":32000,"codexContextWindow":262144},
+            {"id":"small-window","contextWindow":1000,"maxOutputTokens":4000}
+        ]), "recommended", "http://localhost/v1", "responses").unwrap();
+        let models = &group["models"];
+        assert_eq!(models[0]["contextWindow"], 1000000);
+        assert_eq!(models[0]["maxInputTokens"], 168000);
+        assert_eq!(models[1]["maxInputTokens"], 80000);
+        assert_eq!(models[2]["maxInputTokens"], 468000);
+        assert_eq!(models[3]["maxOutputTokens"], 1000);
+        assert_eq!(models[3]["maxInputTokens"], 0);
+        for model in models.as_array().unwrap() {
+            assert!(
+                model["maxInputTokens"].as_u64().unwrap()
+                    + model["maxOutputTokens"].as_u64().unwrap()
+                    <= model["contextWindow"].as_u64().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn vscode_picker_preferences_survive_restore_but_route_edits_remain_protected() {
+        let managed = json!({"name":"XwX Deck","vendor":"customendpoint","models":[{"id":"model","url":"http://localhost/v1/responses"}]});
+        let plan = json!({"beforeGroup":null,"managedGroup":managed});
+        let settings = json!({"model":{"reasoningEffort":"high","contextSize":100000}});
+        let mut current = json!([managed]);
+        current[0]["settings"] = settings.clone();
+        let restored = restore_group(&current.to_string(), &plan).unwrap();
+        let restored = parsed(&restored).unwrap();
+        assert_eq!(restored[0]["models"], json!([]));
+        assert_eq!(restored[0]["settings"], settings);
+        current[0]["models"][0]["url"] = json!("https://external.invalid/v1/responses");
+        assert!(restore_group(&current.to_string(), &plan).is_err());
     }
 
     #[test]

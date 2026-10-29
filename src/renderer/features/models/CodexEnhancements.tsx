@@ -7,6 +7,7 @@ import { showErrorToast, showToast } from '@/lib/toast';
 
 interface Props {
   readonly enhancements: CodexEnhancementsSnapshot;
+  readonly usageOnly?: boolean;
   readonly onUpdate: (patch: Record<string, unknown>) => Promise<CodexEnhancementsSnapshot>;
   readonly onAfterUpdate?: () => void;
 }
@@ -45,27 +46,69 @@ function historyResultText(
     : t("已恢复 {0} 个会话文件、{1} 条侧边栏索引{2}", files, rows, skipped);
 }
 
-export function CodexEnhancements({ enhancements, onUpdate, onAfterUpdate }: Props): React.ReactElement {
+export function CodexEnhancements({ enhancements, usageOnly = false, onUpdate, onAfterUpdate }: Props): React.ReactElement {
   useLanguage();
   const [busyAuth, setBusyAuth] = React.useState(false);
   const [busyHistory, setBusyHistory] = React.useState(false);
+  const authBusyRef = React.useRef(false);
+  const authRevisionRef = React.useRef(0);
   const confirm = useConfirm();
   const confirmChecked = useConfirmChecked();
 
-  const handleAuth = React.useCallback(async () => {
-    if (busyAuth) return;
-    const enabled = !enhancements.preserveOfficialLogin;
+  const saveAuth = React.useCallback(async (patch: Record<string, unknown>): Promise<void> => {
+    if (authBusyRef.current) return;
+    authBusyRef.current = true;
+    const revision = ++authRevisionRef.current;
     setBusyAuth(true);
     try {
-      await onUpdate({ preserveOfficialLogin: enabled });
-      showToast(enabled ? t('已开启保留官方登录') : t('已关闭保留官方登录'));
+      await onUpdate(patch);
+      showToast(patch.preserveOfficialLogin
+        ? t('已开启保留官方登录和 Trace')
+        : t('已关闭保留官方登录'));
       onAfterUpdate?.();
     } catch (error) {
-      showErrorToast(t('无法更新 ChatGPT 官方登录设置'), error);
+      showErrorToast(t('官方登录设置未完全完成'), error, undefined, {
+        actionProps: { type: 'button', children: t('重试'), onClick: () => {
+          if (revision === authRevisionRef.current) void saveAuth(patch);
+        } }
+      });
     } finally {
+      authBusyRef.current = false;
       setBusyAuth(false);
     }
-  }, [busyAuth, enhancements.preserveOfficialLogin, onAfterUpdate, onUpdate]);
+  }, [onAfterUpdate, onUpdate]);
+
+  const handleAuth = React.useCallback(async () => {
+    if (authBusyRef.current) return;
+    const enabled = !enhancements.preserveOfficialLogin;
+    if (!enabled) {
+      await saveAuth({ preserveOfficialLogin: false });
+      return;
+    }
+    authBusyRef.current = true;
+    let result;
+    try {
+      result = await confirmChecked({
+        title: t('保留官方登录并开启 Trace？'),
+        body: <>
+          {t('保留官方登录时，第三方请求需要通过 Trace 代理。Trace 会继续记录 Token 用量与费用。')}
+          <br /><br />
+          {t('勾选下方选项后，不再保存请求、响应正文等详细内容，以节省空间。此设置对所有 Trace 请求生效。')}
+        </>,
+        checkboxLabel: t('仅保留 Token 和费用，不保存请求与响应内容'),
+        checkboxDefaultChecked: usageOnly,
+        secondaryCheckboxLabel: t('同时删除已有 Trace 详细记录'),
+        secondaryCheckboxWarning: t('删除后无法恢复，Token 和费用统计保留'),
+        secondaryConfirmText: t('删除并应用'),
+        confirmText: t('开启并应用'),
+      });
+    } finally {
+      authBusyRef.current = false;
+    }
+    if (!result.confirmed) return;
+    await saveAuth({ preserveOfficialLogin: true, traceUsageOnly: result.checked,
+      clearTraceDetails: result.secondaryChecked === true });
+  }, [confirmChecked, enhancements.preserveOfficialLogin, saveAuth, usageOnly]);
 
   const handleHistory = React.useCallback(async () => {
     if (busyHistory) return;

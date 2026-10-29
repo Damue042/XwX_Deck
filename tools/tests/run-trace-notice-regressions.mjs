@@ -139,3 +139,17 @@ for (const { name, run } of tests) {
   console.log(`PASS ${name}`);
 }
 console.log(`${tests.length} Trace notice regressions passed`);
+
+const lifecycleBundle = await build({ entryPoints: [resolve(root, 'src/shared/lifecycleNotice.ts')], bundle: true, platform: 'node', format: 'esm', write: false, logLevel: 'silent' });
+const lifecycle = await import('data:text/javascript;base64,' + Buffer.from(lifecycleBundle.outputFiles[0].text).toString('base64'));
+const catalogStarted = lifecycle.traceStartedNotice(undefined, true);
+assert.equal(catalogStarted.type, 'info');
+assert.match(catalogStarted.description, /模型目录已更新.*等待当前回答结束.*重新打开客户端.*原会话/);
+assert.doesNotMatch(catalogStarted.description, /需要开启 Trace|重新开启 Trace/);
+const catalogStopped = lifecycle.traceStoppedNotice(false, undefined, undefined, true);
+assert.equal(catalogStopped.action, undefined);
+assert.match(catalogStopped.description, /模型目录已更新/);
+const interruptedStop = lifecycle.traceStoppedNotice(true, undefined, undefined, true);
+assert.equal(interruptedStop.action, 'stop-trace');
+assert.doesNotMatch(interruptedStop.description, /目录已更新|重新打开客户端/);
+console.log('PASS catalog restart guidance covers successful Trace start/stop and preserves incomplete-stop recovery');

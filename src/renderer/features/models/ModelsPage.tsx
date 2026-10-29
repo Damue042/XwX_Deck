@@ -22,6 +22,7 @@ import type {
 import { useBridge } from '@/bridge/store';
 import { clearLifecycleNotice, closeToast, openBackups, openConfiguration, openProviderSettings, REPAIR_CODEX_CONFIG_EVENT, RESTORE_CLIENT_CONFIG_EVENT, runNoticeAction, showErrorToast, showToast } from '@/lib/toast';
 import { normalizeErrorMessage } from '../../../shared/errors';
+import { CODEX_CATALOG_RESTART_NOTE } from '../../../shared/lifecycleNotice';
 import { modelCatalogFailureMessage } from '../../../shared/modelCatalogError';
 import { waitForModelCatalog } from '../../../shared/modelCatalogWait';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -38,6 +39,7 @@ import {
 
 type ClientTab = 'claude' | 'codex';
 const CLAUDE_DESKTOP_TRACE_TOAST_ID = 'claude-desktop-needs-trace';
+const MODEL_TRACE_TOAST_ID = 'model-trace-prerequisite';
 type ClaudeRole = keyof ClaudeModelSettings;
 
 interface Props {
@@ -99,6 +101,8 @@ export function ModelsPage({ active }: Props): React.ReactElement {
   const [enhancementsRetry, retryEnhancements] = React.useReducer((value: number) => value + 1, 0);
   const [claudeDesktopSync, setClaudeDesktopSync] = React.useState(bridge.claudeDesktopSync);
   const [catalog, setCatalog] = React.useState<readonly ModelCatalogEntry[]>(bridge.modelCatalog);
+  const codexCatalogRef = React.useRef(catalog);
+  codexCatalogRef.current = catalog;
   const [claudeProviderCatalog, setClaudeProviderCatalog] = React.useState<readonly ModelCatalogEntry[]>([]);
   const claudeOperationRef = React.useRef(false);
   const [busyClaude, setBusyClaude] = React.useState(false);
@@ -309,6 +313,7 @@ export function ModelsPage({ active }: Props): React.ReactElement {
     const isCurrent = () => generation === providerSwitchGeneration.current.codex && request === codexCatalogRequest.current && currentProviderIds.current.codex === providerId;
     const publish = (list: readonly ModelCatalogEntry[]) => {
       if (!isCurrent()) return false;
+      codexCatalogRef.current = list;
       setCatalog(list);
       bridge.patch({ modelCatalog: list });
       return true;
@@ -515,6 +520,8 @@ export function ModelsPage({ active }: Props): React.ReactElement {
 
   const claudeDesktopSyncEnabled = claudeDesktopSync?.enabled === true;
   const claudeTraceEnabled = bridge.runtime?.tracingEnabled === true;
+  const traceEnabledRef = React.useRef(claudeTraceEnabled);
+  traceEnabledRef.current = claudeTraceEnabled;
   const handleClaudeModelChange = React.useCallback(async (role: ClaudeRole, modelId: string) => {
     if (claudeOperationRef.current) return;
     const generation = ++providerSwitchGeneration.current.claude;
@@ -527,18 +534,19 @@ export function ModelsPage({ active }: Props): React.ReactElement {
       delete unsavedClaudeModels.current[role];
       setClaudeModels({ ...updated, ...unsavedClaudeModels.current });
       bridge.patch({ claudeModels: updated });
-      if (!claudeTraceEnabled && claudeBridgedIds.has(modelId)) {
+      if (!traceEnabledRef.current && claudeBridgedIds.has(modelId)) {
         showToast(t('Claude 模型已保存'), 'info', CLAUDE_DESKTOP_TRACE_TOAST_ID, {
           description: t('此模型需要协议转换，开启 Trace 后 Claude CLI 和 Claude Desktop 才能使用。'),
           actionProps: { type: 'button', children: t('开启 Trace'), onClick: () => runNoticeAction('start-trace') }
         });
-      } else if (claudeDesktopSyncEnabled && !claudeTraceEnabled && !isClaudeDesktopCompatibleModelId(modelId)) {
+      } else if (claudeDesktopSyncEnabled && !traceEnabledRef.current && !isClaudeDesktopCompatibleModelId(modelId)) {
         // CLI uses the saved model now; Desktop lists it only while Trace forwards.
         showToast(t('Claude 模型已保存'), 'info', CLAUDE_DESKTOP_TRACE_TOAST_ID, {
           description: t('Claude CLI 立即生效；Claude Desktop 在 Trace 开启后才会显示此模型。'),
           actionProps: { type: 'button', children: t('开启 Trace'), onClick: () => runNoticeAction('start-trace') }
         });
       } else {
+        closeToast(CLAUDE_DESKTOP_TRACE_TOAST_ID);
         showToast(t('Claude 模型已保存'), 'success');
       }
     } catch (error) {
@@ -634,11 +642,23 @@ export function ModelsPage({ active }: Props): React.ReactElement {
       // read failure suppresses the committed service's success notice.
       // The loader already offered a specific retry/configuration action.
       if (selectionRead === 'failed' || (catalogResult === 'failed' && !providers.warning)) return;
-      showToast(providerId === null ? t('已恢复客户端连接') : t('模型服务已切换'), providers.warning || catalogResult !== 'ready' ? 'info' : 'success', undefined, {
-        description: providers.warning ?? (catalogResult === 'timeout'
+      const selectedProvider = providers.connections.find(provider => provider.id === providerId);
+      const needsTrace = client === 'codex' && selectedProvider && catalogResult === 'ready'
+        ? !!selectedProvider.codexModel && providerRequiresTrace(selectedProvider, selectedProvider.codexModel, codexCatalogRef.current)
+        : providers.traceRequired === true;
+      const traceRequired = needsTrace && !traceEnabledRef.current;
+      const warning = traceRequired
+        ? providers.warning ?? t(selectedProvider?.subscriptionAccountId ? '此连接需要 Deck 提供认证，请开启 Trace 后使用。' : '此模型与 ChatGPT 使用的协议不同，需要开启 Trace 在本地转换请求。')
+        : providers.traceRequired ? undefined : providers.warning;
+      const traceToastId = client === 'claude' ? CLAUDE_DESKTOP_TRACE_TOAST_ID : MODEL_TRACE_TOAST_ID;
+      if (!traceRequired) closeToast(traceToastId);
+      showToast(providerId === null ? t('已恢复客户端连接') : t('模型服务已切换'), warning || catalogResult !== 'ready' ? 'info' : 'success', traceRequired ? traceToastId : undefined, {
+        description: warning ?? (catalogResult === 'timeout'
           ? t('列表仍在加载，服务配置已保存，可继续操作。')
-          : catalogResult === 'failed' ? t('模型列表暂未加载，可稍后重试。') : bridge.runtime?.tracingEnabled ? t('新请求使用所选服务，正在进行的回答继续完成。') : undefined),
-        actionProps: providers.warning?.includes(t('需要开启 Trace')) ? {
+          : catalogResult === 'failed' ? t('模型列表暂未加载，可稍后重试。')
+            : client === 'codex' && selectedProvider && !selectedProvider.subscriptionAccountId ? t(CODEX_CATALOG_RESTART_NOTE)
+              : bridge.runtime?.tracingEnabled ? t('新请求使用所选服务，正在进行的回答继续完成。') : undefined),
+        actionProps: traceRequired ? {
           type: 'button', children: t('开启 Trace'), onClick: () => runNoticeAction('start-trace')
         } : undefined
       });
@@ -709,10 +729,11 @@ export function ModelsPage({ active }: Props): React.ReactElement {
       unsavedCodexChoice.current = null;
       setCodexConfig(saved);
       bridge.patch({ codexConfig: saved });
+      if (!saved.traceRequired || traceEnabledRef.current) closeToast(MODEL_TRACE_TOAST_ID);
       // Keep unrelated recovery actions available beside the saved-model notice.
-      if (saved.warning) {
-        showToast(t('模型选择已保存'), 'info', undefined, { description: saved.warning,
-          actionProps: saved.warning.includes(t('需要开启 Trace')) ? { type: 'button', children: t('开启 Trace'), onClick: () => runNoticeAction('start-trace') } : undefined });
+      if (saved.warning && (!saved.traceRequired || !traceEnabledRef.current)) {
+        showToast(t('模型选择已保存'), 'info', saved.traceRequired ? MODEL_TRACE_TOAST_ID : undefined, { description: saved.warning,
+          actionProps: saved.traceRequired ? { type: 'button', children: t('开启 Trace'), onClick: () => runNoticeAction('start-trace') } : undefined });
       } else if (saved.modelCatalogSource === 'external') {
         showToast(t('ChatGPT 模型可能未更新'), 'info', undefined, {
           description: EXTERNAL_CODEX_CATALOG_DESCRIPTION,
@@ -740,9 +761,21 @@ export function ModelsPage({ active }: Props): React.ReactElement {
   }, [bridge.api, bridge.patch, bridge.providers, codexConfig, codexProviderId, codexChoiceByLabel, activeCodexCatalog]);
 
   const handleEnhancementsUpdate = React.useCallback(async (patch: Record<string, unknown>): Promise<CodexEnhancementsSnapshot> => {
-    const updated = await bridge.api.updateCodexEnhancements(patch);
+    const { traceUsageOnly, clearTraceDetails, ...enhancementPatch } = patch;
+    const updated = await bridge.api.updateCodexEnhancements(enhancementPatch);
     setEnhancements(updated);
     bridge.patch({ codexEnhancements: updated });
+    if (typeof traceUsageOnly === 'boolean') {
+      let runtime = await bridge.api.getState();
+      if ((runtime.traceUsageOnly ?? runtime.traceWarningGB === 0) !== traceUsageOnly || clearTraceDetails === true) {
+        runtime = await bridge.api.setTraceStoragePolicy({
+          usageOnly: traceUsageOnly, ...(clearTraceDetails === true ? { clearDetails: true } : {})
+        });
+        bridge.patch({ runtime });
+      }
+      if (!runtime.tracingEnabled) runtime = await bridge.api.toggleTracing(true);
+      bridge.patch({ runtime });
+    }
     return updated;
   }, [bridge.api, bridge.patch]);
 
@@ -885,6 +918,7 @@ export function ModelsPage({ active }: Props): React.ReactElement {
             {enhancements ? (
               <CodexEnhancements
                 enhancements={enhancements}
+                usageOnly={bridge.runtime?.traceUsageOnly ?? bridge.runtime?.traceWarningGB === 0}
                 onUpdate={handleEnhancementsUpdate}
                 onAfterUpdate={() => {
                   const generation = providerSwitchGeneration.current.codex;

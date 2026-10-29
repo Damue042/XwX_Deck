@@ -94,7 +94,11 @@ pub(crate) fn non_conversational(row: &Value) -> bool {
     {
         return true;
     }
-    if let Some(output) = row["outputModalities"].as_array().filter(|a| !a.is_empty()) {
+    if let Some(output) = row["outputModalities"]
+        .as_array()
+        .or_else(|| row["providerCapabilities"]["outputModalities"].as_array())
+        .filter(|a| !a.is_empty())
+    {
         if !output
             .iter()
             .filter_map(Value::as_str)
@@ -117,7 +121,7 @@ pub(crate) fn non_conversational(row: &Value) -> bool {
         || id == "qwen-vl-ocr"
 }
 
-pub(super) fn attach(entry: &mut Value, row: &Value) {
+pub(crate) fn attach(entry: &mut Value, row: &Value) {
     if let Some(price) = super::super::provider_pricing::parse(row, text(entry, "id")) {
         entry["providerPrice"] = price;
     }
@@ -174,6 +178,22 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
                 "/token_limits/max_reasoning_token_length",
             ],
         ),
+        (
+            "minThinkingBudget",
+            vec![
+                "/minThinkingBudget",
+                "/min_thinking_budget",
+                "/capabilities/min_thinking_budget",
+            ],
+        ),
+        (
+            "maxThinkingBudget",
+            vec![
+                "/maxThinkingBudget",
+                "/max_thinking_budget",
+                "/capabilities/max_thinking_budget",
+            ],
+        ),
     ] {
         if let Some(v) = first(row, &paths, number) {
             cap[key] = v;
@@ -206,6 +226,7 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
                 "/reasoning_levels",
                 "/reasoningLevels",
                 "/reasoning_efforts",
+                "/supportsReasoningEffort",
                 "/supported_reasoning_levels",
                 "/capabilities/reasoning_levels",
             ],
@@ -221,6 +242,7 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
         "/reasoning_levels",
         "/reasoningLevels",
         "/reasoning_efforts",
+        "/supportsReasoningEffort",
         "/supported_reasoning_levels",
         "/capabilities/reasoning_levels",
     ] {
@@ -254,6 +276,7 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
             vec![
                 "/reasoning",
                 "/supports_reasoning",
+                "/thinking",
                 "/capabilities/reasoning",
                 "/capabilities/thinking",
             ],
@@ -291,6 +314,22 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
             ],
         ),
         ("temperature", vec!["/temperature", "/supports_temperature"]),
+        (
+            "adaptiveThinking",
+            vec![
+                "/adaptiveThinking",
+                "/adaptive_thinking",
+                "/capabilities/adaptive_thinking",
+            ],
+        ),
+        (
+            "streaming",
+            vec![
+                "/streaming",
+                "/supports_streaming",
+                "/capabilities/streaming",
+            ],
+        ),
     ] {
         if let Some(v) = first(row, &paths, Value::is_boolean) {
             cap[key] = v;
@@ -380,6 +419,7 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
                 "/default_reasoning_level",
                 "/defaultReasoningLevel",
                 "/default_reasoning_effort",
+                "/defaultReasoningEffort",
             ],
         ),
         (
@@ -457,6 +497,42 @@ pub(super) fn attach(entry: &mut Value, row: &Value) {
 #[cfg(test)]
 mod purpose_tests {
     use super::*;
+    #[test]
+    fn reference_output_takes_priority_over_relay_filter_labels() {
+        let known = json!({"id":"known-chat","outputModalities":["text"],
+            "providerCapabilities":{"outputModalities":["video"]}});
+        assert!(!non_conversational(&known));
+        let unknown = json!({"id":"unknown-task",
+            "providerCapabilities":{"outputModalities":["video"]}});
+        assert!(non_conversational(&unknown));
+    }
+    #[test]
+    fn vscode_reasoning_metadata_retains_explicit_controls_without_guessing() {
+        let mut entry = json!({"id":"fixture"});
+        attach(
+            &mut entry,
+            &json!({
+                "thinking":true, "supportsReasoningEffort":["low","high"], "defaultReasoningEffort":"high",
+                "adaptiveThinking":false,"minThinkingBudget":1024,"maxThinkingBudget":12000,"streaming":false
+            }),
+        );
+        let cap = &entry["providerCapabilities"];
+        assert_eq!(cap["reasoning"], true);
+        assert_eq!(cap["levels"], json!(["low", "high"]));
+        assert_eq!(cap["defaultLevel"], "high");
+        assert_eq!(cap["adaptiveThinking"], false);
+        assert_eq!(cap["streaming"], false);
+        assert_eq!(cap["minThinkingBudget"], 1024);
+        assert_eq!(cap["maxThinkingBudget"], 12000);
+        let mut sparse = json!({"id":"unknown"});
+        attach(
+            &mut sparse,
+            &json!({"reasoning":true,"adaptiveThinking":"true","minThinkingBudget":-1}),
+        );
+        assert!(sparse["providerCapabilities"]["adaptiveThinking"].is_null());
+        assert!(sparse["providerCapabilities"]["minThinkingBudget"].is_null());
+        assert!(sparse["providerCapabilities"]["levels"].is_null());
+    }
     #[test]
     fn shared_model_purpose_cases() {
         let cases: Value = serde_json::from_str(include_str!(

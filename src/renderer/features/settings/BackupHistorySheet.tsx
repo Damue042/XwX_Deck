@@ -6,7 +6,7 @@ import { useConfirm } from '@/components/ui/confirm-dialog';
 import { useBridge } from '@/bridge/store';
 import type { BackupRecord } from '@/bridge/types';
 import { t, useLanguage } from '@/lib/i18n';
-import { OPEN_BACKUPS_EVENT, openBackups, showErrorToast, showToast } from '@/lib/toast';
+import { OPEN_BACKUPS_EVENT, closeToast, openBackups, showErrorToast, showToast } from '@/lib/toast';
 
 export function BackupHistorySheet(): React.ReactElement {
   const language = useLanguage();
@@ -18,6 +18,7 @@ export function BackupHistorySheet(): React.ReactElement {
   const [loading, setLoading] = React.useState(false);
   const [failed, setFailed] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [openingId, setOpeningId] = React.useState<string | null>(null);
   const generation = React.useRef(0);
   const trigger = React.useRef<HTMLButtonElement>(null);
   const body = React.useRef<HTMLDivElement>(null);
@@ -36,7 +37,7 @@ export function BackupHistorySheet(): React.ReactElement {
   React.useEffect(() => {
     if (open) void load();
     return () => { generation.current++; };
-  }, [open, load]);
+  }, [open, load, bridge.runtime?.tracingEnabled]);
   React.useEffect(() => {
     const show = (event: Event) => {
       setSelectedPath((event as CustomEvent<string | undefined>).detail);
@@ -53,9 +54,37 @@ export function BackupHistorySheet(): React.ReactElement {
     const a = row.getBoundingClientRect(), b = container.getBoundingClientRect();
     if (a.top < b.top || a.bottom > b.bottom) container.scrollTop += a.top - b.top;
   }, [records, selectedPath]);
-  const openFolder = async (id?: string) => {
-    try { await bridge.api.openBackupFolder(id); }
+  const openFolder = async (record?: BackupRecord) => {
+    if (openingId) return;
+    setOpeningId(record?.id ?? 'directory');
+    if (record) setSelectedPath(record.path);
+    try {
+      const result = await bridge.api.openBackupFolder(record?.id);
+      if (record && result?.selected !== true) showToast(
+        t('未能选中备份：{0}', record.path.split(/[\\/]/).pop()),
+        'info', 'backup-location',
+        { actionProps: { children: t('复制路径'), onClick: () => void copyPath(record) } }
+      );
+      else if (record) closeToast('backup-location');
+    }
     catch (error) { showErrorToast(t('无法打开备份位置'), error); }
+    finally { setOpeningId(null); }
+  };
+  const copyPath = async (record: BackupRecord) => {
+    try { await bridge.api.copyText(record.path); showToast(t('备份路径已复制'), 'success'); }
+    catch (error) { showErrorToast(t('无法复制备份路径'), error); }
+  };
+  const restoreState = (record: BackupRecord): NonNullable<BackupRecord['restoreState']> => {
+    const state = record.restoreState ?? (record.canRestore ? 'ready' : 'unsupported');
+    return state === 'ready' && bridge.runtime?.tracingEnabled ? 'trace-active' : state;
+  };
+  const restoreExplanation = (record: BackupRecord): string => {
+    switch (restoreState(record)) {
+      case 'trace-active': return t('停止 Trace 后可恢复');
+      case 'invalid-backup': return t('备份格式无效，请选择其他备份');
+      case 'unsafe-target': return t('配置位置异常，请检查目录或链接');
+      default: return t('此备份暂不支持直接恢复');
+    }
   };
   const restore = async (record: BackupRecord) => {
     if (busy || !await confirm({ title: t('恢复{0}？', t(record.title)), body: t('将替换当前配置，并先备份现有文件。数据位置保持不变。'), confirmText: t('恢复'), cancelText: t('取消') })) return;
@@ -96,7 +125,7 @@ export function BackupHistorySheet(): React.ReactElement {
             <Dialog.Title>{t('备份')}</Dialog.Title>
             <Dialog.Description className="sr-only">{t('查看备份历史')}</Dialog.Description>
             <span className="backup-header-actions">
-              <Button type="button" variant="ghost" size="icon" title={t('打开备份目录')} aria-label={t('打开备份目录')} onClick={() => void openFolder()}><FolderOpen className="ic" aria-hidden="true" /></Button>
+              <Button type="button" variant="ghost" size="icon" title={t('打开备份目录')} aria-label={t('打开备份目录')} disabled={openingId !== null} aria-busy={openingId === 'directory'} onClick={() => void openFolder()}><FolderOpen className="ic" aria-hidden="true" /></Button>
               <Dialog.Close render={<Button type="button" variant="ghost" size="icon" aria-label={t('关闭备份')} />}><X className="ic" aria-hidden="true" /></Dialog.Close>
             </span>
           </header>
@@ -105,10 +134,24 @@ export function BackupHistorySheet(): React.ReactElement {
               {(!index || day(records[index - 1].createdAt) !== day(record.createdAt)) && <p className="backup-day">{day(record.createdAt)}</p>}
               <div className="backup-record" data-backup-id={record.id} data-selected={record.path === selectedPath || undefined}>
                 <time dateTime={new Date(record.createdAt).toISOString()}>{new Date(record.createdAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })}</time>
-                <span className="backup-record-name" title={t(record.title)}>{t(record.title)}</span>
+                <span className="backup-record-name" title={`${t(record.title)}\n${record.path}`}>{t(record.title)}</span>
                 <span className="backup-record-actions">
-                  <Button type="button" variant="ghost" size="icon" title={t('打开位置')} aria-label={t('打开{0}备份位置', t(record.title))} onClick={() => void openFolder(record.id)}><FolderOpen className="ic" aria-hidden="true" /></Button>
-                  {record.canRestore && <Button type="button" variant="ghost" size="sm" disabled={busy} aria-label={t('恢复{0}', t(record.title))} onClick={() => void restore(record)}>{t('恢复')}</Button>}
+                  <Button type="button" variant="ghost" size="icon" title={t('打开位置')} aria-label={t('打开{0}备份位置', t(record.title))} disabled={openingId !== null} aria-busy={openingId === record.id} onClick={() => void openFolder(record)}><FolderOpen className="ic" aria-hidden="true" /></Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={busy}
+                    aria-label={t('恢复{0}', t(record.title))}
+                    title={restoreState(record) === 'ready' ? t('恢复{0}', t(record.title)) : restoreExplanation(record)}
+                    onClick={() => {
+                      if (restoreState(record) === 'ready' && record.canRestore) void restore(record);
+                      else showToast(restoreExplanation(record), 'info', 'backup-restore', {
+                        actionProps: restoreState(record) === 'trace-active' ? {
+                          children: t('前往 Trace'),
+                          onClick: () => {
+                            setOpen(false);
+                            window.dispatchEvent(new CustomEvent('xwxdeck:navigate', { detail: 'signal' }));
+                          },
+                        } : undefined,
+                      });
+                    }}>{t('恢复')}</Button>
                 </span>
               </div>
             </React.Fragment>)}

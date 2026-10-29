@@ -599,7 +599,8 @@ impl Pilot {
         };
         let mut hash = Sha256::new();
         let mut external = false;
-        let owned = self.root.join(format!("client-wiring-{id}.json")).exists();
+        let owned = self.root.join(format!("client-wiring-{id}.json")).exists()
+            || id == "vscode" && self.root.join("client-direct-vscode.json").exists();
         for path in &paths {
             checked_path(path)?;
             let source = read(path)?;
@@ -896,6 +897,10 @@ impl Pilot {
         self.apply_client_wiring_for(port, None)
     }
     pub(super) fn apply_client_wiring_for(&self, port: u16, only: Option<&str>) -> Result<()> {
+        let direct_owned = self.root.join("client-direct-vscode.json").exists();
+        if only.is_none_or(|id| id == "vscode") {
+            self.restore_vscode_direct()?;
+        }
         for (id, route) in self
             .settings
             .other
@@ -924,7 +929,9 @@ impl Pilot {
                 self.restore_client_wiring(Some(id))?;
             }
             let snapshot = self.client_route_snapshot(id)?;
-            if snapshot["configDigest"] != route["acceptedDigest"] {
+            if !(id == "vscode" && direct_owned)
+                && snapshot["configDigest"] != route["acceptedDigest"]
+            {
                 return Err(format!(
                     "{} 配置已变化，原文件已保留，请重新确认接管",
                     ingress::label(id)
@@ -1007,6 +1014,97 @@ impl Pilot {
     }
     pub(super) fn restore_client_wiring(&self, only: Option<&str>) -> Result<()> {
         restore_wiring_ledgers(&self.root, only, |id| self.wiring_recovery_paths(id))
+    }
+
+    pub(super) fn restore_vscode_direct(&self) -> Result<()> {
+        let ledger = self.root.join("client-direct-vscode.json");
+        let Some(source) = read(&ledger)? else {
+            return Ok(());
+        };
+        let plans: Vec<Value> = serde_json::from_str(&source).map_err(err)?;
+        let allowed = self.wiring_recovery_paths("vscode")?;
+        let mut ready = vec![];
+        for plan in plans {
+            let path = PathBuf::from(text(&plan, "file"));
+            if !allowed.contains(&path) || plan["jsonGroup"] != true {
+                return Err("Copilot 直连恢复路径不匹配，保留证据".into());
+            }
+            checked_path(&path)?;
+            let current = read(&path)?;
+            if current.is_none() && plan["beforeExisted"] == true {
+                return Err("Copilot 配置被删除，保留直连恢复证据".into());
+            }
+            let restored = adapters::restore_group(current.as_deref().unwrap_or("[]"), &plan)?;
+            ready.push((path, current, restored));
+        }
+        for (path, current, restored) in ready {
+            write_checked(&path, current.as_deref().unwrap_or_default(), &restored)?;
+        }
+        fs::remove_file(ledger).map_err(err)
+    }
+
+    pub(super) fn write_vscode_direct(&self, restored: bool) -> Result<()> {
+        if self.active() {
+            return Ok(());
+        }
+        let route = self
+            .settings
+            .other
+            .get("clientRoutes")
+            .and_then(|routes| routes.get("vscode"));
+        let provider = route
+            .filter(|route| route["enabled"] != false)
+            .and_then(|route| {
+                self.settings
+                    .connections
+                    .iter()
+                    .find(|provider| provider.id == text(route, "providerId"))
+            });
+        let owned = self.root.join("client-direct-vscode.json").exists();
+        if !owned && provider.is_none() {
+            return Ok(());
+        }
+        self.restore_vscode_direct()?;
+        let Some(provider) = provider else {
+            return Ok(());
+        };
+        if !self.client_discovery().installed("vscode")
+            || !self.client_discovery().management_supported("vscode")
+        {
+            return Ok(());
+        }
+        if !owned
+            && !restored
+            && self.client_route_snapshot("vscode")?["configDigest"]
+                != route.unwrap()["acceptedDigest"]
+        {
+            return Err("Copilot 配置已变化，原文件已保留，请重新确认接管".into());
+        }
+        let plans = adapters::vscode_direct_plans(self, provider)?;
+        let ledger = self.root.join("client-direct-vscode.json");
+        for plan in &plans {
+            checked_path(&PathBuf::from(text(plan, "file")))?;
+        }
+        write(&ledger, &json!(plans).to_string())?;
+        credentials::private_permissions(&ledger, false)?;
+        for plan in plans {
+            let path = PathBuf::from(text(&plan, "file"));
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(err)?;
+            }
+            let before = if plan["beforeExisted"] == true {
+                Some(text(&plan, "before").to_owned())
+            } else {
+                None
+            };
+            write_checked(
+                &path,
+                before.as_deref().unwrap_or_default(),
+                text(&plan, "content"),
+            )?;
+            credentials::private_permissions(&path, false)?;
+        }
+        Ok(())
     }
 }
 

@@ -1540,17 +1540,18 @@ html[data-theme="night"] .repair-sheet-backdrop { background: rgba(0,0,0,.5); }
 .repair-sheet-body.backup-history-body { padding: 8px 24px 32px; }
 .backup-day { margin: 24px 0 4px; color: var(--quiet); font-size: 12px; line-height: 20px; }
 .backup-day:first-child { margin-top: 0; }
-.backup-record { --control-label-optical-offset: 0px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 32px 32px; column-gap: 8px; align-items: center; min-height: 48px; padding: 7px 0 9px; border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 500; line-height: 20px; }
+.backup-record { --control-label-optical-offset: 0px; display: grid; grid-template-columns: 40px minmax(0, 1fr) 32px max-content; column-gap: 8px; align-items: center; min-height: 48px; padding: 7px 0 9px; border-radius: 6px; font-family: inherit; font-size: 13px; font-weight: 500; line-height: 20px; }
 .backup-record[data-selected] { background: var(--hover); }
 .backup-record time { color: var(--quiet); font-size: 12px; line-height: 20px; font-variant-numeric: tabular-nums; }
 .backup-record-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; }
 .backup-record-actions { display: contents; }
 .backup-record-actions .btn { display: flex; align-items: center; justify-content: center; width: 32px; min-width: 32px; height: 32px; min-height: 32px; padding: 0; font: inherit; }
 .backup-record-actions .btn > [data-slot='button-label'] { position: static; top: auto; display: block; font: inherit; }
+.backup-record-actions .btn:not(.control-icon) { width: auto; padding-inline: 4px; }
 .backup-record-actions svg { display: block; width: 16px; height: 16px; }
 .backup-history-empty { color: var(--quiet); padding-block: 24px; display: flex; align-items: center; justify-content: space-between; }
 .backup-history-loading { margin: 24px auto; animation: control-spin 1s linear infinite; }
-@media (max-width: 480px) { .repair-sheet-header.backup-history-header { padding-inline: 20px; } .repair-sheet-body.backup-history-body { padding-inline: 20px; } .backup-record { grid-template-columns: 36px minmax(0, 1fr) 32px 32px; } }
+@media (max-width: 480px) { .repair-sheet-header.backup-history-header { padding-inline: 20px; } .repair-sheet-body.backup-history-body { padding-inline: 20px; } .backup-record { grid-template-columns: 36px minmax(0, 1fr) 32px max-content; } }
 .repair-sheet-header { flex: 0 0 auto; min-height: 64px; padding: 17px 20px 14px 22px; display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;  }
 .repair-sheet-heading { min-width: 0; display: block; }
 .repair-sheet-heading h2 { margin: 0; font-size: 15px; font-weight: 620; letter-spacing: -.01em; }

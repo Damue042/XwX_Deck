@@ -519,6 +519,8 @@ fn restore_codex_fields(
         vec![
             "model",
             "model_provider",
+            "openai_base_url",
+            "chatgpt_base_url",
             "model_context_window",
             "model_catalog_json",
             "web_search",
@@ -554,19 +556,21 @@ fn restore_codex_fields(
             }
         }
     }
-    let fields = CODEX_PROVIDER_FIELDS
-        .iter()
-        .filter(|key| {
-            semantic(provider_field(&previous, "xwx_deck", key))
-                != semantic(provider_field(&expected, "xwx_deck", key))
-        })
-        .copied()
-        .collect::<Vec<_>>();
-    for key in &fields {
-        if semantic(provider_field(&current, "xwx_deck", key))
-            != semantic(provider_field(&expected, "xwx_deck", key))
-            && semantic(provider_field(&current, "xwx_deck", key))
-                != semantic(provider_field(&previous, "xwx_deck", key))
+    let mut fields = vec![];
+    for id in ["openai", "xwx_deck"] {
+        for key in CODEX_PROVIDER_FIELDS {
+            if semantic(provider_field(&previous, id, key))
+                != semantic(provider_field(&expected, id, key))
+            {
+                fields.push((id, *key));
+            }
+        }
+    }
+    for (id, key) in &fields {
+        if semantic(provider_field(&current, id, key))
+            != semantic(provider_field(&expected, id, key))
+            && semantic(provider_field(&current, id, key))
+                != semantic(provider_field(&previous, id, key))
         {
             return Err("外部服务配置变化已保留，Gateway 继续运行；请恢复受管字段后重试".into());
         }
@@ -581,35 +585,37 @@ fn restore_codex_fields(
             current.remove(key);
         }
     }
-    for key in fields {
-        if let Some(value) = provider_field(&previous, "xwx_deck", key) {
-            let restored = restored_value(value, provider_field(&current, "xwx_deck", key));
-            current["model_providers"]["xwx_deck"][key] = restored;
+    for (id, key) in fields {
+        if let Some(value) = provider_field(&previous, id, key) {
+            let restored = restored_value(value, provider_field(&current, id, key));
+            current["model_providers"][id][key] = restored;
         } else if let Some(table) = current
             .get_mut("model_providers")
-            .and_then(|p| p.get_mut("xwx_deck"))
+            .and_then(|p| p.get_mut(id))
             .and_then(Item::as_table_like_mut)
         {
             table.remove(key);
         }
     }
-    if previous
-        .get("model_providers")
-        .and_then(|p| p.get("xwx_deck"))
-        .is_none()
-        && current
+    for id in ["openai", "xwx_deck"] {
+        if previous
             .get("model_providers")
-            .and_then(|p| p.get("xwx_deck"))
+            .and_then(|p| p.get(id))
+            .is_none()
+            && current
+            .get("model_providers")
+            .and_then(|p| p.get(id))
             .and_then(Item::as_table_like)
             .is_some_and(|t| t.is_empty())
-    {
-        if let Some(table) = current
-            .get_mut("model_providers")
-            .and_then(Item::as_table_like_mut)
         {
-            table.remove("xwx_deck");
-            if table.is_empty() && previous.get("model_providers").is_none() {
-                current.remove("model_providers");
+            if let Some(table) = current
+                .get_mut("model_providers")
+                .and_then(Item::as_table_like_mut)
+            {
+                table.remove(id);
+                if table.is_empty() && previous.get("model_providers").is_none() {
+                    current.remove("model_providers");
+                }
             }
         }
     }
@@ -643,7 +649,7 @@ fn codex_external_change(
             && provider_field(expected, provider, "requires_openai_auth").and_then(Item::as_bool)
                 == Some(true)
     };
-    ["model", "model_provider", "model_context_window"]
+    ["model", "model_provider", "model_context_window", "openai_base_url", "chatgpt_base_url"]
         .iter()
         .any(|key| semantic(current.get(key)) != semantic(expected.get(key)))
         || CODEX_PROVIDER_FIELDS.iter().any(|key| {
@@ -660,6 +666,9 @@ fn codex_external_change(
 }
 
 impl Pilot {
+    fn preserve_official_login(&self) -> bool {
+        self.settings.codex_enhancements["preserveOfficialLogin"] == true
+    }
     pub fn updates_context(&self) -> updates::Updates {
         self.updates.clone()
     }
@@ -936,6 +945,7 @@ impl Pilot {
         )?;
         {
             let mut trace_store = store.lock().map_err(err)?;
+            trace_store.usage_only = settings.trace_usage_only();
             trace_store.theme = settings.theme.clone();
             trace_store.language = settings
                 .language
@@ -971,6 +981,7 @@ impl Pilot {
             .and_then(|_| pilot.restore_client_wiring(None))
             .and_then(|_| pilot.recover_interrupted_gateway())
             .and_then(|_| pilot.recover_legacy_helper())
+            .and_then(|_| pilot.write_vscode_direct(false))
             .err();
         if pilot.settings_problem.is_none() {
             pilot
@@ -1130,7 +1141,8 @@ impl Pilot {
           "traceHistoryRevision":history_revision,
           "localBaseUrl":self.gateway.as_ref().map(|g|format!("http://127.0.0.1:{}",g.port)),"traceRoot":self.trace_root(),"logRoot":self.log_root(),"claudeConfigDir":self.claude_dir(),"claudeConfigPath":self.claude_path(),
           "backgroundGatewayActive":active,"backgroundGatewayAction":if active {Some("close")} else {None},"chatGptRestartRecommended":false,
-          "sessions":sessions,"traces":count,"storageText":format_bytes(bytes),"traceStorageBytes":bytes,"traceWarningGB":self.settings.trace_warning_gb,"traceDetailLimitGB":self.settings.trace_detail_limit_gb(),"traceAutoCleanup":self.settings.trace_auto_cleanup,"traceStorageNotice":self.store.lock().unwrap().retention_notice,
+          "codexModelCatalogManaged":self.client_enabled("codex")&&self.selected().is_some_and(|p|p.subscription_account_id.is_empty()),
+          "sessions":sessions,"traces":count,"storageText":format_bytes(bytes),"traceStorageBytes":bytes,"traceWarningGB":self.settings.trace_warning_gb,"traceUsageOnly":self.settings.trace_usage_only(),"traceDetailLimitGB":self.settings.trace_detail_limit_gb(),"traceAutoCleanup":self.settings.trace_auto_cleanup,"traceStorageNotice":self.store.lock().unwrap().retention_notice,
           "clients":[{"id":"claude-cli","label":"Claude","enabled":self.client_enabled("claude"),"status":if self.gateway.as_ref().is_some_and(|g|g.claude.is_some()){"taken"}else{"idle"},"statusText":if self.gateway.as_ref().is_some_and(|g|g.claude.is_some()){"追踪中"}else{"待命"},"detail":if self.gateway.as_ref().is_some_and(|g|g.claude.is_some()){"客户端请求正在追踪"}else{"客户端直连"}},{"id":"codex-cli","label":"ChatGPT","enabled":self.client_enabled("codex"),"status":if self.gateway.as_ref().is_some_and(|g|g.codex_managed){"taken"}else{"idle"},"statusText":if self.gateway.as_ref().is_some_and(|g|g.codex_managed){"追踪中"}else{"待命"},"detail":if self.gateway.as_ref().is_some_and(|g|g.codex_managed){"客户端请求正在追踪"}else{"客户端直连"}}],
           "metadata":self.metadata.state(),"lastError":self.settings_problem.clone().or_else(||self.recovery_problem.clone()).or_else(||self.renderer_preferences_problem.clone()).or_else(||self.settings.claude_desktop["syncWarning"].as_str().map(str::to_string)).or_else(||self.store.lock().unwrap().read_problem.clone()).or_else(||self.config().err()),"theme":self.settings.theme,"language":self.settings.language.clone().unwrap_or_else(crate::language::system_language),"automaticUpdates":self.settings.automatic_updates,"traceAppearance":self.trace_appearance(),"startup":{"enabled":self.settings.startup_enabled,"desiredEnabled":self.settings.startup_enabled,"supported":!self.isolated&&cfg!(any(target_os="macos",target_os="windows")),"launchHidden":true,"warning":if self.isolated {Some("隔离验证不注册系统登录项")}else{None}},"update":self.update_state()});
         if let Some(rows) = state["clients"].as_array_mut() {
@@ -1224,10 +1236,15 @@ impl Pilot {
             .and_then(|t| t.get(provider))
             .and_then(|p| p.get("base_url"))
             .and_then(Item::as_str)
+            .or_else(|| (provider == "openai").then(|| d.get("openai_base_url").and_then(Item::as_str)).flatten())
             .unwrap_or("");
         let selected = self.selected();
         let using_selected = selected.is_some_and(|p| {
             provider == "xwx_deck" && self.active()
+                || provider == "openai"
+                    && self.preserve_official_login()
+                    && !self.codex_native_official(p)
+                    && self.active()
                 || !self.needs_gateway(p, "codex")
                     && (provider == p.codex_provider_id
                         || provider == p.id
@@ -1417,7 +1434,11 @@ impl Pilot {
             .filter(|p| p.subscription_account_id.is_empty())
         {
             let entries = self.local_catalog(p)?;
-            self.publish_codex_catalog(p, entries.as_array().map(Vec::as_slice).unwrap_or(&[]))?;
+            self.publish_codex_catalog(
+                p,
+                entries.as_array().map(Vec::as_slice).unwrap_or(&[]),
+                false,
+            )?;
         }
         if let Some(p) = direct_provider {
             set_codex_field(&mut d, "model_provider", value(direct_id));
@@ -1488,7 +1509,11 @@ impl Pilot {
                 return Err("外部模型目录已保留，请确认接管后重试".into());
             }
             let entries = self.local_catalog(p)?;
-            self.publish_codex_catalog(p, entries.as_array().map(Vec::as_slice).unwrap_or(&[]))?;
+            self.publish_codex_catalog(
+                p,
+                entries.as_array().map(Vec::as_slice).unwrap_or(&[]),
+                false,
+            )?;
             set_codex_field(
                 &mut d,
                 "model_catalog_json",
@@ -1536,7 +1561,9 @@ impl Pilot {
                     })
                     .trim_end_matches('/')
                     .to_string();
-                if self.settings.codex_enhancements["unifySessionHistory"] == true {
+                if self.settings.codex_enhancements["unifySessionHistory"] == true
+                    && !self.preserve_official_login()
+                {
                     set_codex_field(&mut d, "model_provider", value("xwx_deck"));
                 }
                 set_codex_provider_field(&mut d, "xwx_deck", "name", value("XwX Deck"));
@@ -1739,7 +1766,42 @@ impl Pilot {
                         )),
                     );
                 }
+            } else if self.preserve_official_login() {
+                let p = provider.as_ref().unwrap();
+                set_codex_field(&mut managed, "model_provider", value("openai"));
+                set_codex_field(&mut managed, "openai_base_url", value(format!("http://127.0.0.1:{port}/v1")));
+                set_codex_field(&mut managed, "model", value(&p.codex_model));
+                if p.codex_context_window > 0 {
+                    set_codex_field(&mut managed, "model_context_window", value(p.codex_context_window as i64));
+                } else {
+                    managed.remove("model_context_window");
+                }
+                if p.subscription_account_id.is_empty() {
+                    if managed.get("web_search").is_none()
+                        && !["responses", "openai-responses"].contains(
+                            &resolve_wire(&self.root, p, Some(&p.codex_model), "responses").as_str(),
+                        )
+                    {
+                        set_codex_field(&mut managed, "web_search", value("disabled"));
+                    }
+                    let catalog_path = self.codex_home().join(crate::edition::config::CATALOG_FILE);
+                    if managed.get("model_catalog_json").and_then(Item::as_str)
+                        .is_some_and(|path| Path::new(path) != catalog_path)
+                    {
+                        return Err("外部模型目录已保留，请先明确接管后再开启 Trace".into());
+                    }
+                    self.publish_codex_catalog(
+                        p,
+                        self.local_catalog(p)?.as_array().map(Vec::as_slice).unwrap_or(&[]),
+                        true,
+                    )?;
+                    set_codex_field(&mut managed, "model_catalog_json", value(catalog_path.to_string_lossy().to_string()));
+                }
+                if self.owns_codex_resume_alias(&doc(&before)?)? {
+                    set_codex_provider_field(&mut managed, "xwx_deck", "base_url", value(format!("http://127.0.0.1:{port}/v1")));
+                }
             } else {
+                let gateway_provider = "xwx_deck";
                 if let Some(p) = provider.as_ref() {
                     // Codex defaults to adding a cached web_search tool even
                     // when the generated model catalog declares no search.
@@ -1759,10 +1821,10 @@ impl Pilot {
                         .and_then(Item::as_str)
                         .unwrap_or("openai")
                         .to_owned();
-                    if direct != "xwx_deck"
+                    if direct != gateway_provider
                         && managed
                             .get("model_providers")
-                            .and_then(|p| p.get("xwx_deck"))
+                            .and_then(|p| p.get(gateway_provider))
                             .is_none()
                     {
                         if let Some(table) = managed
@@ -1770,25 +1832,25 @@ impl Pilot {
                             .and_then(|t| t.get(&direct))
                             .cloned()
                         {
-                            managed["model_providers"]["xwx_deck"] = table;
+                            managed["model_providers"][gateway_provider] = table;
                         }
                     }
-                    set_codex_field(&mut managed, "model_provider", value("xwx_deck"));
+                    set_codex_field(&mut managed, "model_provider", value(gateway_provider));
                     set_codex_provider_field(
                         &mut managed,
-                        "xwx_deck",
+                        gateway_provider,
                         "name",
                         value(&p.display_name),
                     );
                     set_codex_provider_field(
                         &mut managed,
-                        "xwx_deck",
+                        gateway_provider,
                         "wire_api",
                         value("responses"),
                     );
                     set_codex_provider_field(
                         &mut managed,
-                        "xwx_deck",
+                        gateway_provider,
                         "supports_websockets",
                         value(false),
                     );
@@ -1805,7 +1867,7 @@ impl Pilot {
                     if p.subscription_account_id.is_empty() {
                         set_codex_provider_field(
                             &mut managed,
-                            "xwx_deck",
+                            gateway_provider,
                             "experimental_bearer_token",
                             value(&p.bearer_token),
                         );
@@ -1825,6 +1887,7 @@ impl Pilot {
                                 .as_array()
                                 .map(Vec::as_slice)
                                 .unwrap_or(&[]),
+                            true,
                         )?;
                         set_codex_field(
                             &mut managed,
@@ -1842,41 +1905,43 @@ impl Pilot {
                     .as_ref()
                     .filter(|p| !p.subscription_account_id.is_empty())
                 {
-                    set_codex_field(&mut managed, "model_provider", value("xwx_deck"));
+                    set_codex_field(&mut managed, "model_provider", value(gateway_provider));
                     set_codex_field(&mut managed, "model", value(&p.codex_model));
                     set_codex_provider_field(
                         &mut managed,
-                        "xwx_deck",
+                        gateway_provider,
                         "name",
                         value(&p.display_name),
                     );
                     set_codex_provider_field(
                         &mut managed,
-                        "xwx_deck",
+                        gateway_provider,
                         "wire_api",
                         value("responses"),
                     );
                     set_codex_provider_field(
                         &mut managed,
-                        "xwx_deck",
+                        gateway_provider,
                         "experimental_bearer_token",
                         value("xwx-local-subscription"),
                     );
                 }
                 set_codex_provider_field(
                     &mut managed,
-                    "xwx_deck",
+                    gateway_provider,
                     "base_url",
                     value(format!("http://127.0.0.1:{port}/v1")),
                 );
-                if native_auth::owns_auth(&managed, "xwx_deck") {
-                    if let Some(table) = managed
-                        .get_mut("model_providers")
-                        .and_then(|p| p.get_mut("xwx_deck"))
-                        .and_then(Item::as_table_like_mut)
-                    {
-                        for key in ["auth", "http_headers", "env_http_headers"] {
-                            table.remove(key);
+                for id in [gateway_provider, "xwx_deck"] {
+                    if native_auth::owns_auth(&managed, id) {
+                        if let Some(table) = managed
+                            .get_mut("model_providers")
+                            .and_then(|p| p.get_mut(id))
+                            .and_then(Item::as_table_like_mut)
+                        {
+                            for key in ["auth", "http_headers", "env_http_headers"] {
+                                table.remove(key);
+                            }
                         }
                     }
                 }
@@ -1946,6 +2011,21 @@ impl Pilot {
                     }
                 }
                 return Err(error);
+            }
+        }
+        // The Gateway menu may include bridged models. Restore the direct
+        // menu together with the direct endpoint, including after live edits.
+        if g.codex_managed {
+            if let Some(p) = self
+                .selected()
+                .filter(|p| p.subscription_account_id.is_empty())
+            {
+                let entries = self.local_catalog(p)?;
+                self.publish_codex_catalog(
+                    p,
+                    entries.as_array().map(Vec::as_slice).unwrap_or(&[]),
+                    false,
+                )?;
             }
         }
         Ok(())
@@ -2131,6 +2211,7 @@ impl Pilot {
         self.store.lock().map_err(err)?.end_writer();
         fs::remove_file(self.root.join("gateway-recovery.json")).map_err(err)?;
         self.desktop_apply(None)?;
+        self.write_vscode_direct(true)?;
         Ok(())
     }
     pub async fn dashboard_url(&mut self) -> Result<String> {
@@ -2289,10 +2370,10 @@ impl Pilot {
                         let mut snapshot = self.providers().await;
                         // The recursive call sees the Gateway temporarily detached.
                         // Its Trace prerequisite is resolved by publish_routes above.
-                        if let Some(warning) = value.get("warning").filter(|warning| {
-                            warning.as_str()
-                                != Some("选择已保存，需要开启 Trace 后用于客户端请求。")
-                        }) {
+                        if let Some(warning) = value
+                            .get("warning")
+                            .filter(|_| value["traceRequired"] != true)
+                        {
                             snapshot["warning"] = warning.clone();
                         }
                         Ok(snapshot)
@@ -2334,11 +2415,12 @@ impl Pilot {
                 let model=text(&input,"model");client_wiring::checked_model(id,model)?;
                 let previous=self.settings.clone();
                 self.restore_client_wiring(Some(id))?;
+                if id=="vscode"{self.restore_vscode_direct()?;}
                 if !self.settings.other.contains_key("clientRoutes"){self.settings.other.insert("clientRoutes".into(),json!({}));}
                 self.settings.other.get_mut("clientRoutes").unwrap()[id]=json!({"providerId":provider_id,"model":model,"enabled":snapshot["enabled"],"acceptedDigest":self.client_route_snapshot(id)?["configDigest"]});
                 let port=self.gateway.as_ref().map(|g|g.port);
-                let result=self.persist().and_then(|_|if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else{Ok(())});
-                if let Err(error)=result{self.settings=previous;let restored=self.persist().and_then(|_|if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else{Ok(())});if let Err(recovery)=restored{self.recovery_problem=Some(recovery);}return Err(error);}
+                let result=self.persist().and_then(|_|if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else if id=="vscode"{self.write_vscode_direct(false)}else{Ok(())});
+                if let Err(error)=result{self.settings=previous;let restored=self.persist().and_then(|_|if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else if id=="vscode"{self.write_vscode_direct(true)}else{Ok(())});if let Err(recovery)=restored{self.recovery_problem=Some(recovery);}return Err(error);}
                 if let Some(g)=self.gateway.as_ref(){let clients=self.generic_routes();let mut routes=g.routes.write().map_err(err)?;routes.forwarding.add_clients(&clients);routes.clients=clients;}
                 self.client_route_snapshot(id)
             }
@@ -2426,6 +2508,9 @@ impl Pilot {
                         || self.settings.other.get("clientRoutes").and_then(|routes|routes.get(id)).is_some_and(|route|route["enabled"]!=false && !text(route,"providerId").is_empty())));
                 if (location.is_some() || restore_detection) && active_installation {
                     return Err("请先停止此客户端的追踪，再更改安装位置".into());
+                }
+                if id == "vscode" && (location.is_some() || restore_detection) {
+                    self.restore_vscode_direct()?;
                 }
                 let mut clients = self.model_clients();
                 if method == "removeModelClient" {
@@ -2707,9 +2792,10 @@ impl Pilot {
                     let routes=self.settings.other.get_mut("clientRoutes").and_then(Value::as_object_mut).ok_or("客户端未配置")?;
                     let route=routes.get_mut(id).ok_or("客户端未配置")?;let enabled=route["enabled"]==false;
                     if !enabled{self.restore_client_wiring(Some(id))?;}
+                    if id=="vscode"{self.restore_vscode_direct()?;}
                     self.settings.other.get_mut("clientRoutes").unwrap()[id]["enabled"]=json!(enabled);
                     let port=self.gateway.as_ref().map(|g|g.port);
-                    let result=self.persist().and_then(|_|if enabled{if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else{Ok(())}}else{Ok(())});
+                    let result=self.persist().and_then(|_|if enabled{if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else if id=="vscode"{self.write_vscode_direct(true)}else{Ok(())}}else{Ok(())});
                     if let Err(error)=result{self.settings=previous;let restored=self.persist().and_then(|_|if let Some(port)=port{self.apply_client_wiring_for(port,Some(id))}else{Ok(())});if let Err(recovery)=restored{self.recovery_problem=Some(recovery);}return Err(error);}
                     if let Some(g)=self.gateway.as_ref(){let clients=self.generic_routes();let mut routes=g.routes.write().map_err(err)?;routes.forwarding.add_clients(&clients);routes.clients=clients;}return Ok(self.state());
                 }
@@ -2806,6 +2892,9 @@ impl Pilot {
                 }
                 self.persist()?;
                 if self.settings.selected["claude"]==id {self.write_claude_direct(false)?;self.refresh_desktop_selection()?;}
+                if !self.active() && self.settings.other.get("clientRoutes").and_then(|routes| routes.get("vscode")).is_some_and(|route| route["providerId"]==id) {
+                    self.write_vscode_direct(false)?;
+                }
                 Ok(self.providers().await)
             }
             "switchClientProvider" => {
@@ -2851,14 +2940,18 @@ impl Pilot {
                         .is_some_and(|p| self.needs_gateway(p, client))
                     && !self.active()
                 {
-                    snapshot["warning"] =
-                        json!("选择已保存，需要开启 Trace 后用于客户端请求。");
+                    snapshot["warning"] = json!(if client == "codex" && self.preserve_official_login() {
+                        "选择已保存。保留官方登录时，第三方请求需要开启 Trace 后通过 Gateway 转发。"
+                    } else {
+                        "选择已保存，需要开启 Trace 后用于客户端请求。"
+                    });
+                    snapshot["traceRequired"] = json!(true);
                 }
                 if let Some(old) = old_alias {
                     let current_config = self.config()?;
                     let changed_auth = self.settings.other.get("traceDesiredEnabled") != Some(&json!(true))
                         && provider_field(&current_config, "xwx_deck", "auth").map(ToString::to_string) != old_auth;
-                    if changed_auth || provider_field(&current_config, "xwx_deck", "base_url").and_then(Item::as_str) != Some(old.as_str()) {
+                    if snapshot["traceRequired"] != true && (changed_auth || provider_field(&current_config, "xwx_deck", "base_url").and_then(Item::as_str) != Some(old.as_str())) {
                         snapshot["warning"] = json!("旧会话连接已更新。请等待当前回答结束后重启 Codex，再打开原会话继续。");
                     }
                 }
@@ -2900,6 +2993,7 @@ impl Pilot {
                 let mut snapshot = self.codex_snapshot()?;
                 if self.selected().is_some_and(|p| self.needs_gateway(p, "codex")) {
                     snapshot["warning"] = json!("模型选择已保存，需要开启 Trace 后用于客户端请求。");
+                    snapshot["traceRequired"] = json!(true);
                 }
                 Ok(snapshot)
             }
@@ -2973,6 +3067,22 @@ impl Pilot {
                 Ok(self.state())
             }
             "setTraceStoragePolicy" => {
+                for key in ["usageOnly", "clearDetails"] {
+                    if input.get(key).is_some_and(|v| !v.is_boolean()) {
+                        return Err("无效的详细记录选项".into());
+                    }
+                }
+                if let Some(value) = input.get("limitGB") {
+                    let limit = value.as_f64().ok_or("无效容量")?;
+                    if !limit.is_finite() || limit < 0.0 {
+                        return Err("无效容量".into());
+                    }
+                }
+                if input["clearDetails"] == true
+                    && !input["usageOnly"].as_bool().unwrap_or(self.settings.trace_usage_only())
+                {
+                    return Err("请先选择仅记录用量，再清理已有详细记录".into());
+                }
                 if input.get("clearUsage").is_some_and(|v| !v.is_boolean()) {
                     return Err("无效的用量清理选项".into());
                 }
@@ -2980,10 +3090,13 @@ impl Pilot {
                     return Err("仅在明确切换为 0 GB 时可同时清空用量".into());
                 }
                 let previous = self.settings.clone();
-                if let Some(limit) = input["limitGB"].as_f64() {
-                    if !limit.is_finite() || limit < 0.0 {
-                        return Err("无效容量".into());
+                if let Some(usage_only) = input["usageOnly"].as_bool() {
+                    if self.settings.trace_warning_gb == 0.0 {
+                        self.settings.trace_warning_gb = self.settings.trace_detail_limit_gb();
                     }
+                    self.settings.other.insert("traceUsageOnly".into(), json!(usage_only));
+                }
+                if let Some(limit) = input["limitGB"].as_f64() {
                     let detail_limit = if limit > 0.0 { limit } else { self.settings.trace_detail_limit_gb() };
                     self.settings.other.insert("traceDetailLimitGB".into(), json!(detail_limit));
                     self.settings.trace_warning_gb = limit;
@@ -2996,8 +3109,23 @@ impl Pilot {
                     return Err(error);
                 }
                 {
+                    let clear_busy = self.gateway.as_ref().is_some_and(|g| {
+                        g.activity.count() > 0 || g.activity.waiting_tools() > 0
+                    });
                     let mut store = self.store.lock().map_err(err)?;
-                    store.set_retention((self.settings.trace_warning_gb * 1024.0f64.powi(3)) as u64, self.settings.trace_auto_cleanup);
+                    store.usage_only = self.settings.trace_usage_only();
+                    let limit = (self.settings.trace_warning_gb * 1024.0f64.powi(3)) as u64;
+                    if input.get("limitGB").is_some() || input.get("autoCleanup").is_some() {
+                        store.set_retention(limit, self.settings.trace_auto_cleanup);
+                    } else {
+                        store.limit = limit;
+                    }
+                    if input["clearDetails"] == true {
+                        if clear_busy {
+                            return Err("仅用量设置已保存，已有请求仍在生成；详细记录未删除，请等待本轮结束后重试清理".into());
+                        }
+                        store.clear_details()?;
+                    }
                     if input["clearUsage"] == true { store.reset_usage()?; }
                 }
                 Ok(self.state())
@@ -4247,6 +4375,31 @@ mod config_merge_tests {
         let managed="model_provider = \"xwx_deck\"\n[model_providers.xwx_deck]\nbase_url = \"http://127.0.0.1:59233/v1\"\n";
         let external = managed.replace("59233", "59999");
         assert!(restore_codex_fields(&external, before, managed, false).is_err());
+    }
+    #[test]
+    fn preserves_official_identity_and_protects_root_url_restoration() {
+        for original_url in ["", "openai_base_url = \"https://official.invalid/v1\"\n"] {
+            let before = format!(
+                "model_provider = \"openai\"\nmodel = \"original\"\n{original_url}# user settings\n"
+            );
+            let managed = "model_provider = \"openai\"\nmodel = \"relay\"\nopenai_base_url = \"http://127.0.0.1:59233/v1\"\n# user settings\n".to_string();
+            let current = managed.replace("# user settings", "# latest comment\ncustom_option = true");
+            let restored = restore_codex_fields(&current, &before, &managed, false).unwrap();
+            let restored_doc = doc(&restored).unwrap();
+            assert_eq!(restored_doc["model_provider"].as_str(), Some("openai"));
+            assert_eq!(restored_doc["model"].as_str(), Some("original"));
+            assert_eq!(
+                semantic(restored_doc.get("openai_base_url")),
+                semantic(doc(&before).unwrap().get("openai_base_url"))
+            );
+            assert!(restored.contains("# latest comment"));
+            assert_eq!(restored_doc["custom_option"].as_bool(), Some(true));
+            let external = managed.replace("59233", "59999");
+            assert!(codex_external_change(
+                &doc(&external).unwrap(), &doc(&managed).unwrap(), "openai", false
+            ));
+            assert!(restore_codex_fields(&external, &before, &managed, false).is_err());
+        }
     }
     #[test]
     fn older_auth_flag_migration_is_not_external_drift() {

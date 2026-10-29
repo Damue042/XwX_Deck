@@ -72,6 +72,7 @@ export function createPreviewApi(): XwXDeckApi {
     storageText: string;
     traceStorageBytes: number;
     traceWarningGB: number;
+    traceUsageOnly: boolean;
     language: NonNullable<XwXDeckRuntimeState['language']>;
     traceDetailLimitGB: number;
     traceAutoCleanup: boolean;
@@ -100,6 +101,7 @@ export function createPreviewApi(): XwXDeckApi {
     storageText: '0 B',
     traceStorageBytes: 0,
     traceWarningGB: 2,
+    traceUsageOnly: false,
     language: 'zh-CN',
     traceDetailLimitGB: 2,
     traceAutoCleanup: false,
@@ -419,6 +421,10 @@ export function createPreviewApi(): XwXDeckApi {
     },
     setLanguage: async language => { state.language = language; return emitState(); },
     setTraceStoragePolicy: async (input) => {
+      if (typeof input.usageOnly === 'boolean') {
+        state.traceUsageOnly = input.usageOnly;
+        if (state.traceWarningGB === 0) state.traceWarningGB = state.traceDetailLimitGB;
+      }
       if (input.limitGB !== undefined && (!Number.isSafeInteger(input.limitGB) || input.limitGB < 0)) {
         throw new Error('Trace 存储上限须为非负整数，单位 GB。');
       }
@@ -426,10 +432,17 @@ export function createPreviewApi(): XwXDeckApi {
         if (input.limitGB > 0) state.traceDetailLimitGB = input.limitGB;
         else if (state.traceWarningGB > 0) state.traceDetailLimitGB = state.traceWarningGB;
         state.traceWarningGB = input.limitGB;
+        if (input.usageOnly === undefined) state.traceUsageOnly = input.limitGB === 0;
         if (input.limitGB === 0) {
           state.traceStorageBytes = 0;
           state.storageText = '0 B';
         }
+      }
+      if (input.clearDetails === true) {
+        state.traceStorageBytes = 0;
+        state.storageText = '0 B';
+        state.sessions = 0;
+        state.traces = 0;
       }
       if (input.clearUsage === true && input.limitGB === 0) traceUsageCleared = true;
       if (input.autoCleanup !== undefined) state.traceAutoCleanup = input.autoCleanup;
@@ -482,8 +495,8 @@ export function createPreviewApi(): XwXDeckApi {
       }
     }),
     getBackupHistory: async () => [
-      { id: 'preview-settings', title: '应用设置', path: 'preview-settings-backup.bak', createdAt: Date.now() - 3600000, canRestore: !state.tracingEnabled, sourceDigest: 'preview', targetDigest: 'preview' },
-      { id: 'preview-codex', title: 'ChatGPT 配置', path: 'preview-codex-backup.toml', createdAt: Date.now() - 86400000, canRestore: !state.tracingEnabled, sourceDigest: 'preview', targetDigest: 'preview' },
+      { id: 'preview-settings', title: '应用设置', path: 'preview-settings-backup.bak', createdAt: Date.now() - 3600000, canRestore: !state.tracingEnabled, restoreState: state.tracingEnabled ? 'trace-active' : 'ready', sourceDigest: 'preview', targetDigest: 'preview' },
+      { id: 'preview-codex', title: 'ChatGPT 配置', path: 'preview-codex-backup.toml', createdAt: Date.now() - 86400000, canRestore: !state.tracingEnabled, restoreState: state.tracingEnabled ? 'trace-active' : 'ready', sourceDigest: 'preview', targetDigest: 'preview' },
     ],
     openBackupFolder: async () => undefined,
     restoreBackup: async () => ({ restored: true, backupPath: 'preview-settings-backup.bak' }),

@@ -111,6 +111,8 @@ export interface XwXDeckRuntimeState {
   readonly backgroundGatewayActive: boolean;
   readonly backgroundGatewayAction?: 'close' | 'open';
   readonly chatGptRestartRecommended: boolean;
+  /** Running Codex caches the generated catalog until the client restarts. */
+  readonly codexModelCatalogManaged?: boolean;
   /** Claude Desktop must restart to use (`local`) or leave (`direct`) Deck's Gateway. */
   readonly claudeDesktopRestart?: 'local' | 'direct';
   readonly missingCodexHistoryProviders?: readonly string[];
@@ -120,6 +122,7 @@ export interface XwXDeckRuntimeState {
   readonly storageText: string;
   readonly traceStorageBytes: number;
   readonly traceWarningGB: number;
+  readonly traceUsageOnly?: boolean;
   readonly traceDetailLimitGB?: number;
   readonly traceAutoCleanup: boolean;
   readonly traceStorageNotice?: string;
@@ -199,6 +202,7 @@ export type CodexAuthMode = 'chatgpt' | 'api-key' | 'unknown';
 
 export interface CodexConfigSnapshot {
   readonly warning?: string;
+  readonly traceRequired?: boolean;
   readonly configPath: string;
   readonly authPath: string;
   readonly exists: boolean;
@@ -296,6 +300,7 @@ export interface BackupRecord {
   readonly path: string;
   readonly createdAt: number;
   readonly canRestore: boolean;
+  readonly restoreState?: 'ready' | 'trace-active' | 'unsupported' | 'invalid-backup' | 'unsafe-target';
   readonly sourceDigest: string | null;
   readonly targetDigest: string | null;
 }
@@ -329,7 +334,7 @@ export interface XwXDeckApi extends EditionApi {
   cancelUpdate(): Promise<XwXDeckUpdateState>;
   setStartupEnabled(enabled: boolean): Promise<XwXDeckRuntimeState>;
   setTheme(theme: AppTheme): Promise<XwXDeckRuntimeState>;
-  setTraceStoragePolicy(input: { limitGB?: number; autoCleanup?: boolean; clearUsage?: boolean }): Promise<XwXDeckRuntimeState>;
+  setTraceStoragePolicy(input: { limitGB?: number; autoCleanup?: boolean; usageOnly?: boolean; clearDetails?: boolean; clearUsage?: boolean }): Promise<XwXDeckRuntimeState>;
   setTraceAppearance(payload: Partial<Omit<TraceAppearanceSnapshot, 'customImageUrl'>>): Promise<XwXDeckRuntimeState>;
   chooseTraceBackground(): Promise<XwXDeckRuntimeState | undefined>;
   clearTraceBackground(): Promise<XwXDeckRuntimeState>;
@@ -349,7 +354,7 @@ export interface XwXDeckApi extends EditionApi {
     traceRetention: TraceRetentionRepairResult;
   }>;
   getBackupHistory(): Promise<readonly BackupRecord[]>;
-  openBackupFolder(id?: string): Promise<void>;
+  openBackupFolder(id?: string): Promise<{ selected: boolean } | void>;
   restoreBackup(input: Pick<BackupRecord, 'id' | 'sourceDigest' | 'targetDigest'>): Promise<{ restored: boolean; backupPath?: string | null }>;
   repairUnreadableSettings(): Promise<{ backupPath: string; lostProviderSettings: boolean }>;
   repairInvalidCodexConfiguration(): Promise<{

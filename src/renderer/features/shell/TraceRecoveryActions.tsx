@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useBridge } from '@/bridge/store';
-import { claudeDesktopRestartNote, isTraceStopBusyError, lifecycleFailure, traceStoppedNotice } from '../../../shared/lifecycleNotice';
+import { isTraceStopBusyError, lifecycleFailure, traceStartedNotice, traceStoppedNotice } from '../../../shared/lifecycleNotice';
 import { normalizeErrorMessage } from '../../../shared/errors';
 import { TRACE_ACTION_EVENT, closeToast, clearLifecycleNotice, openBackups, setLifecycleActionsBusy, showLifecycleNotice, showToast } from '@/lib/toast';
 import { useConfirm } from '@/components/ui/confirm-dialog';
@@ -11,6 +11,11 @@ export function TraceRecoveryActions(): null {
   const confirm = useConfirm();
   const busyRef = React.useRef(false);
   const pendingTraceAction = React.useRef<boolean | undefined>(undefined);
+  React.useEffect(() => {
+    if (!runtime?.tracingEnabled) return;
+    closeToast('model-trace-prerequisite');
+    closeToast('claude-desktop-needs-trace');
+  }, [runtime?.tracingEnabled]);
   React.useEffect(() => {
     const handle = async (event: Event) => {
       const enabled = (event as CustomEvent<boolean>).detail;
@@ -61,11 +66,9 @@ export function TraceRecoveryActions(): null {
         } else if (next.tracingEnabled) {
           // The model page resumes a selection that was waiting for Trace, so this
           // must not ask for a re-selection the user may not owe.
-          showLifecycleNotice(next.claudeDesktopRestart === 'local'
-            ? { message: 'Trace 已开启', description: claudeDesktopRestartNote('local'), type: 'info' }
-            : { message: 'Trace 已开启', description: '本地转发与协议转换已开启。刚才因缺少 Trace 未完成的模型选择会自动继续；若客户端连接失败，请完全退出并重新打开。', type: 'success' });
+          showLifecycleNotice(traceStartedNotice(next.claudeDesktopRestart, next.codexModelCatalogManaged));
         } else {
-          showLifecycleNotice(traceStoppedNotice(next.backgroundGatewayAction === 'close', next.claudeDesktopRestart, next.connectionNotice));
+          showLifecycleNotice(traceStoppedNotice(next.backgroundGatewayAction === 'close', next.claudeDesktopRestart, next.connectionNotice, next.codexModelCatalogManaged));
         }
       } catch (error) {
         void api.getState().then(state => patch({ runtime: state })).catch(() => undefined);

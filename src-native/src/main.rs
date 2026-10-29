@@ -823,15 +823,31 @@ async fn pilot_rpc(
             Ok(json!({"status":status,"body":body,"visibleDuringRequest":visible}))
         }
         "openDataFolder" | "openLogFolder" | "openBackupFolder" => {
+            let backup_id = args.first().and_then(Value::as_str).unwrap_or("");
             let p = pilot.lock().await;
             let path = if method == "openDataFolder" {
                 p.trace_root()
             } else if method == "openBackupFolder" {
-                p.backup_folder(args.first().and_then(Value::as_str).unwrap_or(""))?
+                p.backup_folder(backup_id)?
             } else {
                 p.log_root()
             };
             drop(p);
+            if method == "openBackupFolder" && !backup_id.is_empty() {
+                #[cfg(target_os = "windows")]
+                let selected = windows_reveal::select_backup(&path)?;
+                #[cfg(not(target_os = "windows"))]
+                let selected = {
+                    let selected = app.opener().reveal_item_in_dir(&path).is_ok();
+                    if !selected {
+                        app.opener()
+                            .open_path(path.parent().ok_or("备份目录无效")?.to_string_lossy(), None::<&str>)
+                            .map_err(|e| e.to_string())?;
+                    }
+                    selected
+                };
+                return Ok(json!({"selected":selected}));
+            }
             #[cfg(target_os = "windows")]
             windows_reveal::open_folder(&path)?;
             #[cfg(not(target_os = "windows"))]

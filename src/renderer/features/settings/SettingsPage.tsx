@@ -87,7 +87,7 @@ export function SettingsPage({ active }: Props): React.ReactElement {
   React.useEffect(() => { if (bridge.runtime) setRuntime(bridge.runtime); }, [bridge.runtime]);
   React.useEffect(() => { if (bridge.runtime?.webCryptoStorage) setWebCryptoStorage(bridge.runtime.webCryptoStorage); }, [bridge.runtime?.webCryptoStorage]);
   React.useEffect(() => { if (bridge.updateState) setUpdateState(bridge.updateState); }, [bridge.updateState]);
-  const usageOnly = runtime?.traceWarningGB === 0;
+  const usageOnly = runtime?.traceUsageOnly ?? runtime?.traceWarningGB === 0;
   const storageLimitGB = usageOnly
     ? runtime?.traceDetailLimitGB ?? DEFAULT_TRACE_LIMIT_GB
     : runtime?.traceWarningGB ?? DEFAULT_TRACE_LIMIT_GB;
@@ -117,9 +117,8 @@ export function SettingsPage({ active }: Props): React.ReactElement {
     && (runtime?.traceStorageBytes ?? 0) > (runtime?.traceWarningGB ?? DEFAULT_TRACE_LIMIT_GB) * 1024 ** 3;
   const needsManualCleanup = storageExceeded && !runtime?.traceAutoCleanup;
   const storageUsedText = runtime?.traceStorageBytes === undefined ? '—' : formatBytes(runtime.traceStorageBytes);
-  const storagePercent = usageOnly ? 0
-    : Math.min(100, Math.max(0, (runtime?.traceStorageBytes ?? 0) / (storageLimitGB * 1024 ** 3) * 100));
-  const saveStorage = React.useCallback(async (input: { limitGB?: number; autoCleanup?: boolean; clearUsage?: boolean }) => {
+  const storagePercent = Math.min(100, Math.max(0, (runtime?.traceStorageBytes ?? 0) / (storageLimitGB * 1024 ** 3) * 100));
+  const saveStorage = React.useCallback(async (input: { limitGB?: number; autoCleanup?: boolean; usageOnly?: boolean; clearDetails?: boolean; clearUsage?: boolean }) => {
     if (savingStorage) return;
     setSavingStorage(true);
     try {
@@ -157,19 +156,18 @@ export function SettingsPage({ active }: Props): React.ReactElement {
     limitCommitPending.current = true;
     try {
       if (usageOnly) {
-        await saveStorage({ limitGB: storageLimitGB });
+        await saveStorage({ usageOnly: false });
       } else {
         const proceed = await confirmChecked({
           title: t('切换为仅用量模式？'),
-          body: t('现有 Trace 详细记录将被永久删除。之后不再保存请求和响应内容，只保留 token 用量与费用统计。Gateway 仍会正常转发。'),
-          confirmText: t('删除记录并切换'),
+          body: t('之后不再保存请求和响应内容，只保留 Token 用量与费用统计。已有记录默认保留；勾选清理时，详细内容将永久删除，统计仍保留。'),
+          confirmText: t('切换'),
           cancelText: t('取消'),
-          tone: 'danger',
-          checkboxLabel: t('同时删除已有 Token 用量和费用统计'),
+          checkboxLabel: t('同时删除已有 Trace 详细记录'),
           checkboxDefaultChecked: false
         });
         if (!proceed.confirmed) return;
-        await saveStorage({ limitGB: 0, ...(proceed.checked ? { clearUsage: true } : {}) });
+        await saveStorage({ usageOnly: true, ...(proceed.checked ? { clearDetails: true } : {}) });
       }
       await bridge.refreshStats();
     } finally {

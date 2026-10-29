@@ -2,7 +2,7 @@ export type ModelProtocol =
   | 'anthropic-messages' | 'openai-responses' | 'chat-completions' | 'gemini';
 export type ModelCatalogEndpointKind = 'openai' | 'anthropic' | 'gemini';
 export type ModelClient = import('./edition').EditionProviderClient | 'claude' | 'codex';
-export type ModelCapabilitySource = 'provider' | 'probed' | 'compatible' | 'official' | 'models.dev' | 'builtin' | 'fallback';
+export type ModelCapabilitySource = 'provider' | 'codex' | 'probed' | 'compatible' | 'official' | 'models.dev' | 'builtin' | 'fallback';
 export type ModelCapabilityField =
   | 'contextWindow'
   | 'maxOutputTokens'
@@ -26,6 +26,7 @@ export interface ModelCatalogEntry {
   readonly modelKind?: string;
   readonly providerFeatures?: Readonly<Record<string, Readonly<Record<string, boolean>>>>;
   readonly maxInputTokens?: number;
+  readonly recommendedContextWindow?: number;
   readonly maxReasoningTokens?: number;
   readonly outputModalities?: readonly string[];
   readonly temperature?: boolean;

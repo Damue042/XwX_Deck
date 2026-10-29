@@ -75,6 +75,10 @@ impl Default for Settings {
     }
 }
 impl Settings {
+    pub(super) fn trace_usage_only(&self) -> bool {
+        self.trace_warning_gb == 0.0
+            || self.other.get("traceUsageOnly").and_then(Value::as_bool) == Some(true)
+    }
     pub(super) fn trace_detail_limit_gb(&self) -> f64 {
         if self.trace_warning_gb > 0.0 {
             return self.trace_warning_gb;

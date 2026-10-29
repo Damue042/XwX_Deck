@@ -717,6 +717,7 @@ pub(super) struct TraceStore {
     writer: Option<super::trace_writer::Lease>,
     pub limit: u64,
     pub auto_cleanup: bool,
+    pub usage_only: bool,
     recording: BTreeMap<String, usize>,
     pub retention_notice: Option<String>,
     pub read_problem: Option<String>,
@@ -814,6 +815,7 @@ impl TraceStore {
             writer: None,
             limit,
             auto_cleanup: auto,
+            usage_only: false,
             recording: BTreeMap::new(),
             retention_notice: None,
             read_problem,
@@ -1832,7 +1834,14 @@ impl TraceStore {
         self.auto_cleanup = auto_cleanup;
         self.apply_retention();
     }
+    pub fn clear_details(&mut self) -> Result<()> {
+        self.with_writer(true, |store| store.purge_completed_details())
+    }
     fn apply_retention(&mut self) {
+        if self.usage_only && self.limit > 0 {
+            self.retention_notice = None;
+            return;
+        }
         if self.limit != 0 {
             self.retention_notice = if self.auto_cleanup {
                 // Writer/index validation still blocks capture. A cleanup
@@ -2015,7 +2024,7 @@ impl TraceStore {
                     .map(|t| t.timestamp_millis() as u64)
             })
             .unwrap_or(0);
-        if self.limit == 0 {
+        if self.usage_only || self.limit == 0 {
             if reset_at > 0 && record_at <= reset_at {
                 return Ok(());
             }
@@ -2220,7 +2229,7 @@ impl TraceStore {
         Ok(())
     }
     fn cleanup_to_limit(&mut self) -> Result<()> {
-        if self.auto_cleanup && self.limit > 0 {
+        if !self.usage_only && self.auto_cleanup && self.limit > 0 {
             while self.size() > self.limit && !self.index["sessions"].as_array().unwrap().is_empty()
             {
                 let oldest = self.index["sessions"]

@@ -22,11 +22,15 @@ export interface ConfirmOptions {
 export interface ConfirmCheckedOptions extends ConfirmOptions {
   readonly checkboxLabel: string;
   readonly checkboxDefaultChecked?: boolean;
+  readonly secondaryCheckboxLabel?: string;
+  readonly secondaryCheckboxWarning?: string;
+  readonly secondaryConfirmText?: string;
 }
 
 export interface ConfirmCheckedResult {
   readonly confirmed: boolean;
   readonly checked: boolean;
+  readonly secondaryChecked?: boolean;
 }
 
 type ConfirmFn = (opts: ConfirmOptions) => Promise<boolean>;
@@ -50,6 +54,9 @@ export function useConfirmChecked(): ConfirmCheckedFn {
 interface DialogState extends ConfirmOptions {
   readonly open: boolean;
   readonly checkboxLabel?: string;
+  readonly secondaryCheckboxLabel?: string;
+  readonly secondaryCheckboxWarning?: string;
+  readonly secondaryConfirmText?: string;
 }
 
 const CLOSED: DialogState = { open: false, title: "" };
@@ -58,6 +65,7 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
   useLanguage();
   const [state, setState] = React.useState<DialogState>(CLOSED);
   const [checked, setChecked] = React.useState(false);
+  const [secondaryChecked, setSecondaryChecked] = React.useState(false);
   const resolverRef = React.useRef<((value: ConfirmCheckedResult) => void) | null>(null);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
 
@@ -65,8 +73,9 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
     const resolve = resolverRef.current;
     resolverRef.current = null;
     setState(prev => ({ ...prev, open: false }));
-    resolve?.({ confirmed: value, checked });
-  }, [checked]);
+    resolve?.({ confirmed: value, checked,
+      ...(state.secondaryCheckboxLabel ? { secondaryChecked: checked && secondaryChecked } : {}) });
+  }, [checked, secondaryChecked, state.secondaryCheckboxLabel]);
 
   const request = React.useCallback<ConfirmCheckedFn>(opts => {
     // Resolve any dialog still pending before opening a new one.
@@ -74,6 +83,7 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
     return new Promise<ConfirmCheckedResult>(resolve => {
       resolverRef.current = resolve;
       setChecked(opts.checkboxDefaultChecked === true);
+      setSecondaryChecked(false);
       setState({ ...opts, open: true });
     });
   }, []);
@@ -82,7 +92,8 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
     await request({ ...opts, checkboxLabel: "" })
   ).confirmed, [request]);
 
-  const tone = state.tone ?? "default";
+  const secondarySelected = checked && secondaryChecked && !!state.secondaryCheckboxLabel;
+  const tone = secondarySelected ? "danger" : state.tone ?? "default";
 
   return (
     <ConfirmContext.Provider value={confirm}>
@@ -124,15 +135,33 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
               </AlertDialog.Description>
             )}
             {state.checkboxLabel && (
-              <label className="mt-4 flex cursor-pointer items-center gap-2 text-[13px] text-popover-foreground">
+              <label className="mt-4 grid cursor-pointer grid-cols-[1rem_minmax(0,1fr)] items-start gap-2 text-[13px] text-popover-foreground">
                 <input
                   type="checkbox"
                   checked={checked}
-                  onChange={event => setChecked(event.currentTarget.checked)}
-                  className="size-4 accent-[var(--accent)]"
+                  onChange={event => {
+                    setChecked(event.currentTarget.checked);
+                    if (!event.currentTarget.checked) setSecondaryChecked(false);
+                  }}
+                  className="mt-0.5 size-4 accent-[var(--accent)]"
                 />
                 <span>{state.checkboxLabel}</span>
               </label>
+            )}
+            {checked && state.secondaryCheckboxLabel && (
+              <div className="mt-3">
+                <label className="grid cursor-pointer grid-cols-[1rem_minmax(0,1fr)] items-start gap-2 text-[13px] text-popover-foreground">
+                  <input type="checkbox" checked={secondaryChecked}
+                    onChange={event => setSecondaryChecked(event.currentTarget.checked)}
+                    className="mt-0.5 size-4 accent-[var(--accent)]" />
+                  <span>{state.secondaryCheckboxLabel}</span>
+                </label>
+                {secondarySelected && state.secondaryCheckboxWarning && (
+                  <p className="mt-2 ml-6 text-[12px] leading-relaxed text-destructive">
+                    {state.secondaryCheckboxWarning}
+                  </p>
+                )}
+              </div>
             )}
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="outline"
@@ -147,7 +176,8 @@ export function ConfirmDialogProvider({ children }: { children: React.ReactNode 
                 variant={tone === "danger" ? "danger" : "default"}
                 onClick={() => settle(true)}
               >
-                {state.confirmText ?? t("确定")}
+                {secondarySelected ? state.secondaryConfirmText ?? state.confirmText ?? t("确定")
+                  : state.confirmText ?? t("确定")}
               </Button>
             </div>
           </AlertDialog.Popup>

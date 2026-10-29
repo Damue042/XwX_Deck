@@ -3,7 +3,7 @@ import * as React from 'react';
 import type { ClientStateRow, ManagerTraceStats } from '@/bridge/types';
 import { useBridge } from '@/bridge/store';
 import { clearLifecycleNotice, showLifecycleNotice, showToast } from '@/lib/toast';
-import { claudeDesktopRestartNote, isTraceStopBusyError, lifecycleFailure, traceStoppedNotice } from '../../../shared/lifecycleNotice';
+import { isTraceStopBusyError, lifecycleFailure, traceStartedNotice, traceStoppedNotice } from '../../../shared/lifecycleNotice';
 import { normalizeErrorMessage } from '../../../shared/errors';
 import { tokenCostPresentation, readoutRange } from '@/lib/format';
 import { isConfiguredModelClient, traceClientLabel } from '../../../shared/clientDownloads';
@@ -19,7 +19,6 @@ type PeriodKey = 'total' | 'today' | 'week';
 const CHATGPT_RESTART_TOAST_ID = 'chatgpt-restart-recommended';
 const TRACE_WAITING_TOAST_ID = 'trace-waiting-client';
 const CHATGPT_RESTART_DESCRIPTION = '当前对话通常可继续使用；若连接未切换、模型未更新或对话无法继续，再完全退出并重新打开 ChatGPT。';
-const TRACE_RESTART_DESCRIPTION = '客户端可能仍在使用旧连接。先发送一条新消息；若未出现在 Trace 中或对话无法继续，再完全退出并重新打开相应客户端。';
 export const TRACE_TOGGLE_REQUEST_EVENT = 'xwxdeck:toggle-trace-request';
 // The page being left needs this long to fade out before the next one may
 // appear, even when the backend answers faster.
@@ -206,13 +205,9 @@ export function SignalPage({ active }: Props): React.ReactElement {
         // The shared recovery actions publish skipped-client guidance through Toast.
         clearLifecycleNotice();
       } else if (next.tracingEnabled) {
-        showLifecycleNotice({
-          message: t('Trace 已开启'),
-          type: next.claudeDesktopRestart === 'local' ? 'info' : 'success',
-          description: next.claudeDesktopRestart === 'local' ? claudeDesktopRestartNote('local') : TRACE_RESTART_DESCRIPTION
-        }, TRACE_WAITING_TOAST_ID);
+        showLifecycleNotice(traceStartedNotice(next.claudeDesktopRestart, next.codexModelCatalogManaged), TRACE_WAITING_TOAST_ID);
       } else {
-        showLifecycleNotice(traceStoppedNotice(next.backgroundGatewayAction === 'close', next.claudeDesktopRestart, next.connectionNotice));
+        showLifecycleNotice(traceStoppedNotice(next.backgroundGatewayAction === 'close', next.claudeDesktopRestart, next.connectionNotice, next.codexModelCatalogManaged));
       }
     } catch (e) {
       void bridge.api.getState().then(runtime => bridge.patch({ runtime })).catch(() => undefined);
@@ -234,7 +229,7 @@ export function SignalPage({ active }: Props): React.ReactElement {
           if (!bridge.patch({ runtime: next })) return;
           showLifecycleNotice(next.lastError
             ? lifecycleFailure(next.lastError, t('恢复客户端配置'))
-            : traceStoppedNotice(next.backgroundGatewayAction === 'close', next.claudeDesktopRestart, next.connectionNotice));
+            : traceStoppedNotice(next.backgroundGatewayAction === 'close', next.claudeDesktopRestart, next.connectionNotice, next.codexModelCatalogManaged));
         } catch (forceError) {
           showLifecycleNotice(lifecycleFailure(forceError, t('强制停止 Trace')));
         }

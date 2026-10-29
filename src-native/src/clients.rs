@@ -19,6 +19,19 @@ pub(super) const CLAUDE_KEYS: &[&str] = &[
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW",
 ];
 
+fn set_claude_role_models(env: &mut serde_json::Map<String, Value>, models: &Value) {
+    for role in ["fable", "opus", "sonnet", "haiku"] {
+        for suffix in ["MODEL", "MODEL_NAME"] {
+            let key = format!("ANTHROPIC_DEFAULT_{}_{suffix}", role.to_uppercase());
+            if let Some(model) = models[role].as_str().filter(|model| !model.is_empty()) {
+                env.insert(key, json!(model));
+            } else {
+                env.remove(&key);
+            }
+        }
+    }
+}
+
 pub(super) struct OfficialCatalog {
     cache: Option<Value>,
     pub(super) provider: Option<Provider>,
@@ -101,7 +114,7 @@ impl OfficialCatalog {
             if id.is_empty() || row["visibility"] != "list" || row["supported_in_api"] == false {
                 continue;
             }
-            let mut entry = json!({"id":id,"vendor":"OpenAI","protocols":["openai-responses"],"clients":["codex"],"protocolsDeclared":true});
+            let mut entry = with_codex_metadata(json!({"id":id,"vendor":"OpenAI","protocols":["openai-responses"],"clients":["codex"],"protocolsDeclared":true}), row);
             if row["display_name"].is_string() {
                 entry["displayName"] = row["display_name"].clone();
             }
@@ -134,6 +147,14 @@ impl OfficialCatalog {
         }
         Ok(json!(entries))
     }
+}
+
+fn with_codex_metadata(mut entry: Value, raw: &Value) -> Value {
+    catalog::metadata::attach(&mut entry, raw);
+    if let Some(capabilities) = entry.as_object_mut().unwrap().remove("providerCapabilities") {
+        entry["nativeCapabilities"] = capabilities;
+    }
+    entry
 }
 
 fn provider_cache(root: &Path, provider: &Provider) -> PathBuf {
@@ -182,7 +203,7 @@ pub(super) async fn subscription_catalog(
         return Ok(json!(rows.iter().filter_map(|m|m["id"].as_str().map(|id|catalog::with_service_metadata(json!({"id":id,"displayName":m["name"].as_str().unwrap_or(id),"vendor":"xai","protocols":["openai-responses"],"protocolsDeclared":true,"clients":["codex","claude"]}), m))).collect::<Vec<_>>()));
     }
     let rows = body["models"].as_array().ok_or("无效订阅模型目录")?;
-    let entries:Vec<_>=rows.iter().filter(|m|m["visibility"]=="list").filter_map(|m|m["slug"].as_str().map(|id|catalog::with_service_metadata(json!({"id":id,"displayName":m["display_name"],"vendor":"openai","protocols":["openai-responses"],"protocolsDeclared":true,"clients":["codex","claude"]}), m))).collect();
+    let entries:Vec<_>=rows.iter().filter(|m|m["visibility"]=="list").filter_map(|m|m["slug"].as_str().map(|id|with_codex_metadata(json!({"id":id,"displayName":m["display_name"],"vendor":"openai","protocols":["openai-responses"],"protocolsDeclared":true,"clients":["codex","claude"]}), m))).collect();
     Ok(json!(entries))
 }
 
@@ -225,6 +246,12 @@ impl Pilot {
     /// Keep the selected connection as intent, while only publishing a direct
     /// endpoint that the receiving client can actually consume.
     pub(super) fn needs_gateway(&self, provider: &Provider, client: &str) -> bool {
+        if client == "codex"
+            && self.preserve_official_login()
+            && !self.codex_native_official(provider)
+        {
+            return true;
+        }
         if !provider.subscription_account_id.is_empty() {
             if client != "codex" {
                 return true;
@@ -237,6 +264,9 @@ impl Pilot {
             }
         }
         if client == "codex" {
+            if provider.codex_model.is_empty() {
+                return false;
+            }
             !["responses", "openai-responses"].contains(
                 &resolve_wire(
                     &self.root,
@@ -855,16 +885,7 @@ impl Pilot {
             }
             env.insert("ANTHROPIC_BASE_URL".into(), json!(Self::claude_base(p)));
             env.insert("ANTHROPIC_AUTH_TOKEN".into(), json!(p.bearer_token));
-            for role in ["fable", "opus", "sonnet", "haiku"] {
-                if let Some(model) = p.claude_models[role].as_str().filter(|s| !s.is_empty()) {
-                    for suffix in ["MODEL", "MODEL_NAME"] {
-                        env.insert(
-                            format!("ANTHROPIC_DEFAULT_{}_{suffix}", role.to_uppercase()),
-                            json!(model),
-                        );
-                    }
-                }
-            }
+            set_claude_role_models(env, &p.claude_models);
             write(
                 &journal,
                 &json!({"before":before,"managed":current,"claudeConfigPath":path}).to_string(),
@@ -938,12 +959,7 @@ impl Pilot {
                 } else {
                     "xwxdeck-local-subscription"
                 });
-            for role in ["fable", "opus", "sonnet", "haiku"] {
-                if let Some(model) = p.claude_models[role].as_str().filter(|s| !s.is_empty()) {
-                    managed["env"][format!("ANTHROPIC_DEFAULT_{}_MODEL", role.to_uppercase())] =
-                        json!(model);
-                }
-            }
+            set_claude_role_models(managed["env"].as_object_mut().unwrap(), &p.claude_models);
         }
         managed["env"]["ANTHROPIC_BASE_URL"] =
             json!(format!("http://127.0.0.1:{port}/_xwx/claude"));
@@ -1349,18 +1365,47 @@ fn merge_known_capability(result: &mut Value, service: &Value, known: Option<&Va
 mod subscription_metadata_tests {
     use super::*;
     #[test]
+    fn role_models_replace_stale_names_and_remove_cleared_roles() {
+        let mut env = json!({
+            "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME":"qwen3.8-max",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME":"deepseek-v4-pro",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME":"deepseek-v4-flash-0731",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL":"old-fable",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME":"old-fable",
+            "PERSONAL_SETTING":"keep"
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let roles =
+            json!({"fable":"", "opus":"gpt-6.1-sol", "sonnet":"glm-5", "haiku":"claude-haiku-5-5"});
+        set_claude_role_models(&mut env, &roles);
+        for role in ["opus", "sonnet", "haiku"] {
+            for suffix in ["MODEL", "MODEL_NAME"] {
+                assert_eq!(
+                    env[&format!("ANTHROPIC_DEFAULT_{}_{suffix}", role.to_uppercase())],
+                    roles[role]
+                );
+            }
+        }
+        assert!(!env.contains_key("ANTHROPIC_DEFAULT_FABLE_MODEL"));
+        assert!(!env.contains_key("ANTHROPIC_DEFAULT_FABLE_MODEL_NAME"));
+        assert_eq!(env["PERSONAL_SETTING"], "keep");
+    }
+    #[test]
     fn raw_subscription_facts_survive_normalization() {
         let raw = json!({"context_window":500000,"input_modalities":["text","image"],"reasoning":true,"supported_reasoning_levels":[{"effort":"high"}],"tool_calling":false});
-        let entry = catalog::with_service_metadata(
+        let entry = with_codex_metadata(
             json!({"id":"exact-model","protocols":["openai-responses"]}),
             &raw,
         );
-        assert_eq!(entry["providerCapabilities"]["contextWindow"], 500000);
+        assert_eq!(entry["nativeCapabilities"]["contextWindow"], 500000);
         assert_eq!(
-            entry["providerCapabilities"]["inputModalities"],
+            entry["nativeCapabilities"]["inputModalities"],
             json!(["text", "image"])
         );
-        assert_eq!(entry["providerCapabilities"]["levels"], json!(["high"]));
+        assert_eq!(entry["nativeCapabilities"]["levels"], json!(["high"]));
+        assert!(entry.get("providerCapabilities").is_none());
         assert_eq!(entry["id"], "exact-model");
         assert_eq!(entry["protocols"], json!(["openai-responses"]));
     }

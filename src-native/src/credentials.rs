@@ -56,6 +56,7 @@ pub(super) fn protected(relative: &str) -> bool {
         "claude-subscription-accounts.json",
         "codex-direct.json",
         "claude-direct.json",
+        "client-direct-vscode.json",
         "gateway-recovery.json",
         "desktop-ledger.json",
         "desktop-sync-ledger.json",

@@ -2,7 +2,7 @@
 use super::*;
 
 pub(super) fn resolve(entry: &Value, native: Option<&Value>, wire: &str) -> Value {
-    let provider = &entry["providerCapabilities"];
+    let provider = &entry["nativeCapabilities"];
     let native = native.unwrap_or(&Value::Null);
     let context = codex_window(entry, Some(native));
     let compact_limit = context / 10 * 9 + context % 10 * 9 / 10;
@@ -23,7 +23,7 @@ pub(super) fn resolve(entry: &Value, native: Option<&Value>, wire: &str) -> Valu
             100,
         ),
     ] {
-        let (number, source) = [("provider", &provider[key]), ("codex", &native[field])]
+        let (number, source) = [("codex", &provider[key]), ("codex", &native[field])]
             .into_iter()
             .find_map(|(source, value)| {
                 value
@@ -52,7 +52,7 @@ pub(super) fn resolve(entry: &Value, native: Option<&Value>, wire: &str) -> Valu
     ] {
         let (supported, source) = provider[key]
             .as_bool()
-            .map(|v| (v, "provider"))
+            .map(|v| (v, "codex"))
             // An official client template cannot prove a relay's support.
             .or_else(|| (native[field] == false).then_some((false, "codex")))
             .unwrap_or((false, "fallback"));
@@ -82,7 +82,7 @@ pub(super) fn resolve(entry: &Value, native: Option<&Value>, wire: &str) -> Valu
             "text",
         ),
     ] {
-        let (value, source) = [("provider", &provider[key]), ("codex", &native[field])]
+        let (value, source) = [("codex", &provider[key]), ("codex", &native[field])]
             .into_iter()
             .find_map(|(source, value)| {
                 value
@@ -116,7 +116,7 @@ mod tests {
             result["restrictions"]["auto_compact_token_limit"],
             "client-context-limit"
         );
-        assert_eq!(result["values"]["effective_context_window_percent"], 90);
+        assert_eq!(result["values"]["effective_context_window_percent"], 92);
     }
     #[test]
     fn capabilities_require_service_evidence_and_a_supported_route() {
@@ -129,7 +129,7 @@ mod tests {
             result["restrictions"]["support_verbosity"],
             "service-unconfirmed"
         );
-        let declared = json!({"contextWindow":100000,"providerCapabilities":{"supportsSearchTool":true,"supportVerbosity":true,"defaultVerbosity":"high"}});
+        let declared = json!({"contextWindow":100000,"nativeCapabilities":{"supportsSearchTool":true,"supportVerbosity":true,"defaultVerbosity":"high"}});
         let result = resolve(&declared, Some(&native), "responses");
         assert_eq!(result["values"]["supports_search_tool"], true);
         assert_eq!(result["values"]["support_verbosity"], true);
@@ -140,10 +140,10 @@ mod tests {
             assert_eq!(result["sources"]["support_verbosity"], "protocol");
         }
         let disabled =
-            json!({"providerCapabilities":{"supportsSearchTool":false,"supportVerbosity":false}});
+            json!({"nativeCapabilities":{"supportsSearchTool":false,"supportVerbosity":false}});
         assert_eq!(
             resolve(&disabled, Some(&native), "responses")["sources"]["supports_search_tool"],
-            "provider"
+            "codex"
         );
     }
     #[test]

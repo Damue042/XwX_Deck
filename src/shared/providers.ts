@@ -30,6 +30,7 @@ export interface ProviderRegistry {
 }
 export interface ProviderSnapshot extends ProviderRegistry {
   readonly warning?: string;
+  readonly traceRequired?: boolean;
   readonly active: Readonly<Record<ProviderClient, string | null>>;
 }
 export type ProviderValidationStatus =

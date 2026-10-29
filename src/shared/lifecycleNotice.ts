@@ -133,15 +133,31 @@ export function claudeDesktopRestartNote(hint: ClaudeDesktopRestartHint | undefi
     : hint === 'local' ? '重启 Claude Desktop 后才会记录它的对话。' : '';
 }
 
+export const CODEX_CATALOG_RESTART_NOTE = 'ChatGPT / Codex 的模型目录已更新。请等待当前回答结束，完全退出并重新打开客户端，再继续原会话。';
+
+export function traceStartedNotice(claudeDesktopRestart?: ClaudeDesktopRestartHint, codexCatalogChanged = false): LifecycleNotice {
+  const description = [
+    codexCatalogChanged ? CODEX_CATALOG_RESTART_NOTE : '',
+    claudeDesktopRestart === 'local' ? claudeDesktopRestartNote('local') : ''
+  ].filter(Boolean).join('');
+  return {
+    message: 'Trace 已开启',
+    type: description ? 'info' : 'success',
+    description: description || '客户端可能仍在使用旧连接。先发送一条新消息；若未出现在 Trace 中或对话无法继续，再完全退出并重新打开相应客户端。'
+  };
+}
+
 export function traceStoppedNotice(
   forwarding = false,
   claudeDesktopRestart?: ClaudeDesktopRestartHint,
-  connectionNotice?: LifecycleNotice
+  connectionNotice?: LifecycleNotice,
+  codexCatalogChanged = false
 ): LifecycleNotice {
   const restart = !forwarding && claudeDesktopRestart === 'direct';
   const requiresTrace = !forwarding && connectionNotice?.action === 'start-trace';
   const description = [
     requiresTrace ? '当前模型需重新开启 Trace 才能使用。' : '',
+    !forwarding && codexCatalogChanged ? CODEX_CATALOG_RESTART_NOTE : '',
     restart ? claudeDesktopRestartNote('direct') : ''
   ].filter(Boolean).join('');
   return {
@@ -149,7 +165,7 @@ export function traceStoppedNotice(
     description: forwarding
       ? '后台仍在运行。请检查恢复结果后重试关闭。'
       : description || undefined,
-    type: forwarding ? 'error' : requiresTrace || restart ? 'info' : 'success',
+    type: forwarding ? 'error' : requiresTrace || restart || codexCatalogChanged ? 'info' : 'success',
     persistent: forwarding,
     action: forwarding ? 'stop-trace' : requiresTrace ? 'start-trace' : undefined
   };

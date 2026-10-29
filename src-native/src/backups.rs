@@ -39,6 +39,19 @@ fn settings_value(source: &str) -> Result<Settings> {
     }
     serde_json::from_value(value).map_err(err)
 }
+fn restore_state(kind: &str, valid: bool, target_safe: bool, active: bool) -> &'static str {
+    if kind == "archive" {
+        "unsupported"
+    } else if !valid {
+        "invalid-backup"
+    } else if !target_safe {
+        "unsafe-target"
+    } else if active {
+        "trace-active"
+    } else {
+        "ready"
+    }
+}
 impl Pilot {
     pub(super) fn backup_root(&self) -> PathBuf {
         self.root.join("backups")
@@ -178,8 +191,9 @@ impl Pilot {
             let target = self.backup_target(record.kind);
             let target_safe = target.as_deref().is_some_and(|path| fs::symlink_metadata(path).is_err() || regular(path));
             let target_source = if target_safe { target.as_deref().map(read).transpose()?.flatten() } else { None };
+            let state = restore_state(record.kind, valid, target_safe, self.active());
             Ok(json!({"id":storage::digest(record.path.to_string_lossy().as_bytes()),"title":record.title,"path":record.path,"createdAt":record.at,
-                "canRestore":valid && target_safe && !self.active(),"sourceDigest":source.as_deref().map(|s| storage::digest(s.as_bytes())),
+                "canRestore":state == "ready","restoreState":state,"sourceDigest":source.as_deref().map(|s| storage::digest(s.as_bytes())),
                 "targetDigest":target_source.as_deref().map(|s| storage::digest(s.as_bytes()))}))
         }).collect::<Result<Vec<Value>>>().map(|rows| json!(rows))
     }
@@ -192,11 +206,7 @@ impl Pilot {
             .into_iter()
             .find(|r| storage::digest(r.path.to_string_lossy().as_bytes()) == id)
             .ok_or("备份已不存在，请刷新列表")?;
-        Ok(if record.path.is_dir() {
-            record.path
-        } else {
-            record.path.parent().ok_or("备份目录无效")?.to_path_buf()
-        })
+        Ok(record.path)
     }
     pub(super) fn restore_backup(&mut self, input: &Value) -> Result<Value> {
         if self.active() {
@@ -297,5 +307,13 @@ mod tests {
         assert!(settings_value("{}").is_err());
         assert!(settings_value(r#"{"providers":{"connections":[],"selected":{}}}"#).is_ok());
         assert!(settings_value(r#"{"connections":[],"selected":{}}"#).is_ok());
+    }
+    #[test]
+    fn restore_reasons_preserve_format_and_target_failures_while_trace_runs() {
+        assert_eq!(restore_state("archive", false, false, true), "unsupported");
+        assert_eq!(restore_state("settings", false, true, true), "invalid-backup");
+        assert_eq!(restore_state("codex", true, false, true), "unsafe-target");
+        assert_eq!(restore_state("settings", true, true, true), "trace-active");
+        assert_eq!(restore_state("codex", true, true, false), "ready");
     }
 }

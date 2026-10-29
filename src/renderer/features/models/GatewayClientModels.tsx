@@ -79,7 +79,7 @@ export function GatewayClientModels({ client, active }: { client: DownloadClient
       const latest = await bridge.api.getClientRoute(client);
       let takeoverConfirmed = false;
       if (latest.requiresTakeover) {
-        takeoverConfirmed = await confirm({ title: t('接管 {0} 的模型连接', label), body: t('原连接会备份，关闭 Trace 后恢复。只修改模型连接，保留其他设置。'), confirmText: t('接管'), cancelText: t('取消') });
+        takeoverConfirmed = await confirm({ title: t('接管 {0} 的模型连接', label), body: t(client === 'vscode' ? '原配置会备份。关闭 Trace 后使用所选服务直连，保留其他模型分组与个人设置。' : '原连接会备份，关闭 Trace 后恢复。只修改模型连接，保留其他设置。'), confirmText: t('接管'), cancelText: t('取消') });
         if (!takeoverConfirmed) {
           if (mounted.current && current === revision.current) {
             desired.current = { providerId: route?.providerId ?? null, model: route?.model ?? '' };
@@ -98,7 +98,7 @@ export function GatewayClientModels({ client, active }: { client: DownloadClient
       void bridge.api.getState().then(runtime => {
         if (mounted.current && current === revision.current && runtimeRef.current === observedRuntime) bridge.patch({ runtime });
       }).catch(() => undefined);
-      if (activeRef.current) showToast(t(client === 'vscode' && bridge.runtime?.tracingEnabled ? '模型已同步，可在 Copilot 中选择' : client === 'workbuddy' ? '已保存，请在 WorkBuddy 任务中选择模型' : !value.automatic ? '模型配置已保存，请在客户端连接' : bridge.runtime?.tracingEnabled ? '模型配置已保存' : '已保存，开启 Trace 后生效'), 'success');
+      if (activeRef.current) showToast(t(client === 'vscode' ? '模型已同步，可在 Copilot 中选择' : client === 'workbuddy' ? '已保存，请在 WorkBuddy 任务中选择模型' : !value.automatic ? '模型配置已保存，请在客户端连接' : bridge.runtime?.tracingEnabled ? '模型配置已保存' : '已保存，开启 Trace 后生效'), 'success');
     } catch (error) {
       if (mounted.current && activeRef.current) showErrorToast(t('模型配置保存失败'), error, `client-save:${client}`, {
         actionProps: { children: t('重试'), onClick: () => void save(desired.current.providerId, desired.current.model) }
@@ -129,7 +129,7 @@ export function GatewayClientModels({ client, active }: { client: DownloadClient
   if (client === 'cursor') return <><div className="field-row"><span className="fr-label">{t('模型连接')}</span><span className="fr-value">{t('Cursor CLI 暂不支持自动接管')}</span></div><ClientDownloads client="cursor" officialOnly /></>;
   return <>
     <div className="field-row">
-      <label className="fr-label" title={client === 'vscode' ? t('接入 VS Code 的 Copilot Chat。开启 Trace 后同步此服务的可用对话模型，在 Copilot 中选择。代码补全不在接管范围内。') : undefined}>{t('模型服务')}</label>
+      <label className="fr-label" title={client === 'vscode' ? t('接入 VS Code 的 Copilot Chat。同步此服务的可用对话模型，在 Copilot 中选择。关闭 Trace 时直连，开启后记录请求。代码补全不在接管范围内。') : undefined}>{t('模型服务')}</label>
       <div className="fr-value" aria-busy={busy}><ProviderPicker registry={bridge.providers} client="codex" clientLabel={label} value={provider} disabled={busy || !route} onChange={id => choose(id, model)} /></div>
     </div>
     <div className="field-row">

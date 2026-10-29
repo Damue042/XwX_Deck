@@ -13,6 +13,7 @@ impl Pilot {
             let mut next = store.lock().map_err(err)?;
             next.theme = current.theme.clone();
             next.language = current.language.clone();
+            next.usage_only = self.settings.trace_usage_only();
         }
         Ok(store)
     }
