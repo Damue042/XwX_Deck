@@ -50,7 +50,9 @@ await esbuild.build({
 });
 const css = spawnSync(process.execPath, [resolve(root, 'tools/build/build-renderer-css.mjs'), '--minify'], { cwd: root, stdio: 'inherit' });
 if (css.status !== 0) throw Error(`Renderer styles failed to build (${css.status ?? css.signal})`);
-await cp(resolve(root, 'dist/renderer/app.css'), resolve(output, 'app.css'));
+// Website resources resolve relative to the deployed directory, including project Pages.
+const rendererCss = await readFile(resolve(root, 'dist/renderer/app.css'), 'utf8');
+await writeFile(resolve(output, 'app.css'), rendererCss.replaceAll('url(/fonts/', 'url(./fonts/'));
 await cp(resolve(root, 'web/site/index.html'), resolve(output, 'index.html'));
 for (const name of ['site.css', 'fonts.css', 'language.js', 'demo-tour.js']) await cp(resolve(root, 'web/site', name), resolve(output, name));
 await cp(resolve(root, 'assets/fonts'), resolve(output, 'fonts'), { recursive: true });
@@ -117,6 +119,7 @@ addEventListener('message', event => {
   if (event.source === window.parent && event.origin === location.origin) applySiteLanguage(event.data?.deckLanguage);
 });
 </script></body>`);
+viewer = viewer.replace(/<style>[\s\S]*?<\/style>/, css => css.replaceAll('url(/fonts/', 'url(./fonts/'));
 await writeFile(resolve(output, 'view.html'), viewer);
 await writeFile(resolve(output, 'viewer.html'), viewer); // Keep existing preview links working.
 // Keep cached entry documents from combining old demo scripts with a new site.

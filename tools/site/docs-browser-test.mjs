@@ -12,12 +12,15 @@ const module = process.env.XWX_PLAYWRIGHT_MODULE;
 const { chromium } = await import(module ? pathToFileURL(resolve(module)).href : 'playwright');
 const root = resolve(import.meta.dirname, '../..');
 const site = resolve(process.env.XWX_SITE_PREVIEW_DIR ?? join(root, 'test-results/site-preview'));
+const siteBase = (process.env.XWX_SITE_BASE_PATH ?? '').replace(/\/$/, '');
+assert.ok(!siteBase || /^\/[^?#]*$/.test(siteBase), 'site base is a URL pathname');
+const docsBase = siteBase + '/docs/';
 const errors = [];
 const checks = [];
 const readerPages = new Set((await readdir(join(site, 'docs'))).filter(file => file.endsWith('.html') && file !== '404.html').map(file => file.replace(/\.html$/, '.md')));
 const markdown = await createMarkdownRenderer(join(root, 'docs'), {
-  config: md => readerContent(md, { readerPages, docsRoot: join(root, 'docs'), base: '/docs/' })
-}, '/docs/');
+  config: md => readerContent(md, { readerPages, docsRoot: join(root, 'docs'), base: docsBase })
+}, docsBase);
 const checklist = await readFile(join(root, 'docs/core-functional-acceptance-checklist.md'), 'utf8');
 const checklistRowCount = [...checklist.matchAll(/^\|\s*[A-Z]{2}\d+\s*\|/gm)].length;
 assert.ok(checklistRowCount > 0, 'The checklist contains identified requirements');
@@ -28,10 +31,12 @@ const fixtureBody = await markdown.renderAsync(checklist + '\n\n## 链接检查\
 });
 const fixtureStyles = (await readFile(join(site, 'docs/index.html'), 'utf8')).match(/<link\b(?=[^>]*\brel="[^"]*\bstylesheet\b[^"]*")[^>]*>/g) || [];
 assert.ok(fixtureStyles.length, 'Table fixture uses the built documentation theme');
-const fixtureHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="/docs/icon.png">${fixtureStyles.join('')}</head><body><main class="vp-doc" style="max-width:720px;margin:40px auto;padding:0 24px">${fixtureBody}</main></body></html>`;
+const fixtureHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="${docsBase}icon.png">${fixtureStyles.join('')}</head><body><main class="vp-doc" style="max-width:720px;margin:40px auto;padding:0 24px">${fixtureBody}</main></body></html>`;
 const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.woff2': 'font/woff2', '.json': 'application/json' };
 const server = createServer(async (request, response) => {
-  const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+  const requestedPath = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+  if (siteBase && !requestedPath.startsWith(siteBase + '/')) { response.writeHead(404); response.end(); return; }
+  const pathname = requestedPath.slice(siteBase.length);
   if (pathname === '/docs/__table-layout-check') {
     response.writeHead(200, { 'content-type': mime['.html'] }); response.end(fixtureHtml); return;
   }
@@ -47,16 +52,17 @@ const server = createServer(async (request, response) => {
 server.listen(0, '127.0.0.1');
 await once(server, 'listening');
 const origin = `http://127.0.0.1:${server.address().port}`;
+const siteUrl = origin + siteBase;
 const browser = await chromium.launch({ ...(process.env.XWX_PLAYWRIGHT_CHANNEL === 'chromium' ? {} : { channel: 'chrome' }), headless: true });
 try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce', locale: 'zh-CN' });
   page.on('pageerror', error => errors.push(String(error)));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
   page.on('response', response => { if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`); });
-  await page.goto(origin, { waitUntil: 'networkidle' });
+  await page.goto(siteUrl + '/', { waitUntil: 'networkidle' });
   assert.equal(await page.locator('h1').innerText(), '更简单的 AI 管理工具');
   await page.getByRole('link', { name: '文档', exact: true }).click();
-  await page.waitForURL(origin + '/docs/');
+  await page.waitForURL(siteUrl + '/docs/');
   await page.locator('.vp-doc h1').waitFor();
   assert.equal((await page.locator('.vp-doc h1').textContent()).replace(/\u200b/g, '').trim(), '快速开始');
   assert.equal(await page.locator('.VPHome').count(), 0);
@@ -64,7 +70,7 @@ try {
 
   for (const width of [320, 390, 780, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto(origin + '/docs/', { waitUntil: 'networkidle' });
+    await page.goto(siteUrl + '/docs/', { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
     const style = await page.locator('.vp-doc').evaluate(el => {
       const css = getComputedStyle(el);
@@ -82,7 +88,7 @@ try {
       await page.locator('.VPSidebar.open').waitFor();
     }
     await page.locator('.VPSidebar').getByRole('link', { name: 'Trace 与用量', exact: true }).click();
-    await page.waitForURL(origin + '/docs/trace-and-usage');
+    await page.waitForURL(siteUrl + '/docs/trace-and-usage');
     await page.locator('.vp-doc h1').filter({ hasText: 'Trace 与用量' }).waitFor();
     assert.equal((await page.locator('.vp-doc h1').textContent()).replace(/\u200b/g, '').trim(), 'Trace 与用量');
     assert.equal(await page.locator('.VPSidebar.open').count(), 0);
@@ -90,7 +96,7 @@ try {
     if (process.env.XWX_SITE_TEST_SCREENSHOT_DIR) {
       await mkdir(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, { recursive: true });
       await page.screenshot({ path: join(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, `docs-trace-${width}.png`) });
-      await page.goto(origin + '/docs/', { waitUntil: 'networkidle' });
+      await page.goto(siteUrl + '/docs/', { waitUntil: 'networkidle' });
       await page.screenshot({ path: join(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, `docs-start-${width}.png`) });
     }
     checks.push(`Reading typography, navigation and overflow at ${width}px`);
@@ -102,7 +108,7 @@ try {
   assert.deepEqual(builtHtml.sort(), [...publicHtml].sort(), 'Only user manual chapters are published');
   assert.equal(await page.locator('.VPSidebar a[href*="public-release-boundary"]').count(), 0);
   for (const route of ['', ...routes]) {
-    await page.goto(`${origin}/docs/${route}`, { waitUntil: 'networkidle' });
+    await page.goto(`${siteUrl}/docs/${route}`, { waitUntil: 'networkidle' });
     assert.ok(((await page.locator('.vp-doc h1').textContent()).replace(/\u200b/g, '').trim()).length);
     assert.doesNotMatch(await page.locator('.vp-doc').innerText(), /[a-f0-9]{40,64}|选择性同步|源码指纹|本地候选|当前源码验收|整合验收/i);
     const decoratedExternalLinks = await page.locator('.vp-external-link-icon, .vp-doc a[href*="://"], .vp-doc a[target="_blank"]').evaluateAll(links => links.filter(link => {
@@ -114,7 +120,9 @@ try {
     for (const href of new Set(links)) {
       const url = new URL(href);
       if (url.origin !== origin) continue;
-      const path = url.pathname.endsWith('/') ? url.pathname + 'index.html' : extname(url.pathname) ? url.pathname : url.pathname + '.html';
+      assert.ok(url.pathname.startsWith(siteBase + '/'), 'local links retain the deployment prefix');
+      const pathname = url.pathname.slice(siteBase.length);
+      const path = pathname.endsWith('/') ? pathname + 'index.html' : extname(pathname) ? pathname : pathname + '.html';
       const html = await readFile(join(site, path), 'utf8');
       if (url.hash) assert.ok(html.includes(`id="${decodeURIComponent(url.hash.slice(1))}"`), `Missing anchor: ${href}`);
     }
@@ -123,7 +131,7 @@ try {
 
   for (const width of [320, 390, 780, 1024, 1440]) {
     await page.setViewportSize({ width, height: 1000 });
-    await page.goto(origin + '/docs/__table-layout-check', { waitUntil: 'networkidle' });
+    await page.goto(siteUrl + '/docs/__table-layout-check', { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.locator('tbody tr').count(), checklistRowCount, 'Every checklist entry renders as a table row');
     assert.equal(await page.locator('tbody tr').evaluateAll(rows => rows.every(row => row.cells.length === 4)), true);
@@ -146,24 +154,24 @@ try {
       assert.equal(await unavailable.getAttribute('aria-disabled'), 'true');
       assert.equal(await unavailable.getAttribute('href'), null);
       await unavailable.click();
-      assert.equal(new URL(page.url()).pathname, '/docs/__table-layout-check');
+      assert.equal(new URL(page.url()).pathname, siteBase + '/docs/__table-layout-check');
     }
     await page.getByRole('link', { name: '可用入口', exact: true }).click();
-    await page.waitForURL(origin + '/docs/trace-and-usage');
+    await page.waitForURL(siteUrl + '/docs/trace-and-usage');
     checks.push(`All ${checklistRowCount} checklist rows, horizontal table scrolling and disabled missing links at ${width}px`);
   }
 
   for (const route of ['download', 'user-manual', 'trace-and-usage', 'provider-compatibility']) {
     for (const width of [320, 390, 1440]) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.goto(`${origin}/docs/${route}`, { waitUntil: 'networkidle' });
+      await page.goto(`${siteUrl}/docs/${route}`, { waitUntil: 'networkidle' });
       assert.equal(await page.locator('.vp-doc table').evaluateAll(tables => tables.every(table => table.parentElement.classList.contains('doc-table-scroll'))), true);
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     }
   }
   checks.push('All public table chapters stay within the reading column on desktop and mobile');
 
-  await page.goto(origin + '/docs/', { waitUntil: 'networkidle' });
+  await page.goto(siteUrl + '/docs/', { waitUntil: 'networkidle' });
   const heading = page.locator('.vp-doc h2').first();
   await heading.hover();
   const anchor = heading.locator('.header-anchor');
@@ -197,7 +205,7 @@ try {
   await page.locator('.vp-doc h1').filter({ hasText: 'Trace 与用量' }).waitFor();
   assert.equal((await page.locator('.vp-doc h1').textContent()).replace(/\u200b/g, '').trim(), 'Trace 与用量');
   await page.getByRole('link', { name: '下一篇 设置与本地数据', exact: true }).click();
-  await page.waitForURL(origin + '/docs/settings-and-data');
+  await page.waitForURL(siteUrl + '/docs/settings-and-data');
   checks.push('Outline scroll, Chinese/Latin local search and next-chapter navigation');
   await page.setViewportSize({ width: 390, height: 900 });
   await page.getByRole('button', { name: '搜索文档', exact: true }).click();
@@ -210,7 +218,7 @@ try {
   await page.locator('.vp-doc h1').filter({ hasText: 'Trace 与用量' }).waitFor();
   checks.push('Mobile Chinese search opens the matching chapter');
   assert.deepEqual(errors, [], 'No browser errors or failed assets');
-  console.log(JSON.stringify({ passed: true, checks }, null, 2));
+  console.log(JSON.stringify({ passed: true, siteBase, checks }, null, 2));
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));

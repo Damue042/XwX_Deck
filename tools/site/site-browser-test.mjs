@@ -19,6 +19,9 @@ unsafeExample.state.traces[0].request.headers = { authorization: 'private fixtur
 assert.throws(() => validateRealExamples(unsafeExample), /Private field/);
 const builtIndex = await readFile(join(site, 'index.html'), 'utf8');
 const builtApp = await readFile(join(site, 'app.html'), 'utf8');
+for (const name of ['app.css', 'view.html']) {
+  assert.ok(!(await readFile(join(site, name), 'utf8')).includes('url(/fonts/'), 'website fonts retain the deployed path prefix: ' + name);
+}
 for (const asset of ['fonts.css', 'site.css', 'hero-field.js', 'language.js', 'demo-tour.js', 'app.html', 'view.html']) {
   assert.ok(builtIndex.includes(asset + '?v='), 'website references must carry a content version: ' + asset);
 }
@@ -41,7 +44,7 @@ const server = createServer(async (request, response) => {
     let body = await readFile(file);
     if (configured && relative === 'index.html') {
       const original = body.toString();
-      const replacement = original.replace(/const DOWNLOADS = \{[^}]+\};/, "const DOWNLOADS = { windows: '/fixture.exe', mac: '/fixture.exe', macIntel: '/fixture.exe' };");
+      const replacement = original.replace(/const DOWNLOADS = \{[^}]+\};/, "const DOWNLOADS = { windows: '/fixture.exe?platform=windows', mac: '/fixture.exe?platform=mac', macIntel: '/fixture.exe?platform=macIntel' };");
       assert.notEqual(replacement, original, 'configured-download fixture must replace the actual download map');
       body = Buffer.from(replacement);
     }
@@ -84,11 +87,12 @@ try {
     assert.equal(page.url(), url + '/');
     assert.equal(await page.title(), 'XwX Deck');
     await page.getByRole('heading', { level: 1 }).waitFor();
+    assert.equal(await page.locator('vite-error-overlay, #webpack-dev-server-client-overlay').count(), 0);
     assert.equal(await page.getByRole('heading', { level: 1 }).textContent(), '更简单的 AI 管理工具');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     const primary = page.locator('#recommended-download');
-    await primary.getByText('下载 Windows 版').waitFor();
-    assert.match(await primary.getAttribute('href'), /windows-x64-setup\.exe$/);
+    await primary.getByText('查看发布状态').waitFor();
+    assert.equal(await primary.getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
     const primaryBox = await primary.boundingBox();
     const otherBox = await page.locator('#download-options > summary').boundingBox();
     assert.ok(Math.abs(primaryBox.x + primaryBox.width / 2 - width / 2) < 1, 'primary download aligns with the page center independently of other versions');
@@ -98,14 +102,16 @@ try {
     for (const target of ['windows', 'mac', 'macIntel']) assert.equal(await page.locator(`[data-download="${target}"]`).isVisible(), true);
     assert.equal(await page.locator('.download-choices .download-choice').count(), 3);
     const intel = page.locator('[data-download="macIntel"]');
-    assert.match(await intel.getAttribute('href'), /mac-x64\.dmg$/);
-    assert.match(await intel.innerText(), /Intel[\s\S]*DMG/);
+    assert.equal(await intel.getAttribute('href'), null);
+    assert.equal(await intel.getAttribute('aria-disabled'), 'true');
+    assert.match(await intel.innerText(), /Intel[\s\S]*暂不可用/);
+    assert.equal(await page.locator('.dl-msg').innerText(), 'Windows 安装包尚未发布。macOS 暂不可用。');
     assert.equal(await page.locator('[data-unavailable-download]').count(), 0);
     assert.equal(await page.locator('.recommend-badge').count(), 0);
     assert.doesNotMatch(await page.locator('.download-choices').innerText(), /推荐|↗/);
     const panelBox = await page.locator('.download-choices').boundingBox();
     assert.ok(panelBox.x >= 0 && panelBox.x + panelBox.width <= width, 'download choices stay inside the viewport');
-    await page.locator('[data-download="mac"]').focus();
+    await page.locator('[data-download="windows"]').focus();
     await page.keyboard.press('Escape');
     assert.equal(await page.locator('#download-options').getAttribute('open'), null);
     assert.equal(await page.locator('#download-options > summary').evaluate(node => node === document.activeElement), true);
@@ -148,7 +154,7 @@ try {
     if (process.env.XWX_SITE_TEST_SCREENSHOT_DIR) {
       await mkdir(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, { recursive: true });
       await page.evaluate(() => { document.activeElement?.blur(); scrollTo(0, 0); });
-      await page.screenshot({ path: join(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, `public-site-${width}.png`), fullPage: true });
+      await page.screenshot({ path: join(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, `public-site-${width}.png`), fullPage: false });
     }
     checks.push(`WE01/WE03: title, visible content, overflow, tabs and real renderer at ${width}px`);
   }
@@ -173,8 +179,9 @@ try {
     await page.frameLocator('#app-demo').getByRole('heading', { name: 'Settings', exact: true }).waitFor();
     assert.match(await page.locator('#demo-progress').innerText(), /Manage API services and subscription accounts/);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    assert.match(await page.locator('#recommended-download').innerText(), /Download for Windows/);
-    assert.match(await page.locator('#recommended-download').getAttribute('href'), /windows-x64-setup\.exe$/);
+    assert.match(await page.locator('#recommended-download').innerText(), /View release status/);
+    assert.equal(await page.locator('#recommended-download').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+    assert.equal(await page.locator('.dl-msg').innerText(), 'The Windows installer has not been released. macOS is unavailable.');
     await page.locator('#download-options > summary').click();
     assert.equal(await page.getByRole('link', { name: 'All releases', exact: true }).isVisible(), true);
     const downloadBox = await page.locator('.download-choices').boundingBox();
@@ -237,10 +244,12 @@ try {
   assert.deepEqual(blockedErrors, []);
   await blockedStorage.close();
   checks.push('WE01/WE03: bilingual copy, download links, live previews, 4 responsive widths, persistence, browser-language override, keyboard/focus, outside dismissal and unavailable storage');
-  for (const [platform, file] of [['windows', 'XwX-Deck-windows-x64-setup.exe'], ['mac', 'XwX-Deck-mac-arm64.dmg'], ['macIntel', 'XwX-Deck-mac-x64.dmg']]) {
-    const hrefs = await page.locator(`[data-download="${platform}"]`).evaluateAll(nodes => nodes.map(node => node.href));
-    assert.equal(hrefs.length, 1);
-    assert.ok(hrefs.every(href => href === 'https://github.com/Damue042/XwX_Deck/releases/latest/download/' + file));
+  assert.equal(await page.locator('a[href*="/releases/latest/download/"]').count(), 0, 'unpublished assets are never represented as working downloads');
+  assert.equal(await page.locator('[data-download="windows"]').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+  for (const platform of ['mac', 'macIntel']) {
+    const choice = page.locator(`[data-download="${platform}"]`);
+    assert.equal(await choice.getAttribute('href'), null);
+    assert.equal(await choice.getAttribute('aria-disabled'), 'true');
   }
   assert.equal(await page.getByRole('link', { name: 'GitHub', exact: true }).getAttribute('href'), 'https://github.com/Damue042/XwX_Deck');
   assert.equal(await page.getByRole('link', { name: '反馈问题', exact: true }).count(), 0);
@@ -248,7 +257,7 @@ try {
   assert.equal(await page.locator('.preview-tools').count(), 0);
   assert.equal(await page.locator('.community-copy').innerText(), '欢迎交流使用体验');
   assert.match(await page.locator('body').evaluate(el => getComputedStyle(el).fontFamily), /Urbanist.*Noto Sans SC/);
-  checks.push('WE02: one recommended download and an accessible list of published packages use GitHub latest; the closing section has three community text links');
+  checks.push('WE02: unpublished Windows links open the new release page; both Mac architectures are unavailable; no broken asset links are exposed');
   await page.goto(url + '/configured/index.html', { waitUntil: 'networkidle' });
   const download = page.waitForEvent('download');
   await page.locator('#recommended-download').click();
@@ -286,7 +295,7 @@ try {
     }, profile);
     const candidate = await context.newPage();
     candidate.on('pageerror', error => errors.push(String(error)));
-    await candidate.goto(url, { waitUntil: 'domcontentloaded' });
+    await candidate.goto(url + '/configured/', { waitUntil: 'domcontentloaded' });
     return { context, candidate };
   }
   for (const profile of profiles) {
@@ -306,7 +315,7 @@ try {
       assert.match(await candidate.locator('.chip-help p').innerText(), /关于本机/);
       await candidate.locator('#download-options > summary').click();
     }
-    assert.equal(await candidate.locator('a.download-choice[href*="mac-x64"]').count(), 1);
+    assert.equal(await candidate.locator('a.download-choice[data-download="macIntel"][href]').count(), 1);
     assert.equal(await candidate.locator('.download-history').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
     await context.close();
   }
@@ -335,8 +344,13 @@ try {
   assert.equal(await fallback.locator('[data-download="windows"]').isVisible(), true);
   assert.equal(await fallback.locator('[data-download="mac"]').isVisible(), true);
   assert.equal(await fallback.locator('[data-download="macIntel"]').isVisible(), true);
+  assert.equal(await fallback.locator('#recommended-download').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+  assert.equal(await fallback.locator('[data-download="windows"]').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+  assert.equal(await fallback.locator('[data-download="mac"]').getAttribute('href'), null);
+  assert.equal(await fallback.locator('[data-download="macIntel"]').getAttribute('href'), null);
+  assert.equal(await fallback.locator('.dl-msg').innerText(), 'Windows 安装包尚未发布。macOS 暂不可用。');
   await noScript.close();
-  checks.push('WE02: 11 OS/architecture profiles, mobile and iPad, missing/denied hints, pointer/keyboard choice preservation, timeout, Escape/outside dismissal and no-JavaScript downloads');
+  checks.push('WE02: 11 OS/architecture profiles, mobile and iPad, missing/denied hints, pointer/keyboard choice preservation, timeout, Escape/outside dismissal and truthful no-JavaScript release status');
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto(url + '/?demo=dashboard#experience', { waitUntil: 'networkidle' });
@@ -415,14 +429,33 @@ try {
   const autoContext = await browser.newContext({ locale: 'zh-CN', reducedMotion: 'no-preference', viewport: { width: 1440, height: 1200 } });
   const autoPage = await autoContext.newPage();
   await autoPage.goto(url, { waitUntil: 'domcontentloaded' });
+  // Record in the page from animation start; protocol polling may first see
+  // the final easing frames, whose remaining displacement is below 2 px.
+  await autoPage.evaluate(() => {
+    const cursor = document.querySelector('#demo-cursor');
+    window.siteTestCursorTrajectory = [];
+    let sampling = false;
+    const record = () => {
+      if (cursor.dataset.phase !== 'moving') { sampling = false; return; }
+      sampling = true;
+      const { x, y } = cursor.getBoundingClientRect();
+      window.siteTestCursorTrajectory.push({ x, y });
+      requestAnimationFrame(record);
+    };
+    new MutationObserver(() => { if (!sampling && cursor.dataset.phase === 'moving') record(); })
+      .observe(cursor, { attributes: true, attributeFilter: ['data-phase'] });
+    if (cursor.dataset.phase === 'moving') record();
+  });
   await autoPage.mouse.wheel(0, 600);
   await autoPage.locator('#demo-play[aria-pressed="true"]').waitFor();
   await autoPage.locator('#demo-cursor[data-phase="moving"]').waitFor();
   assert.equal(await autoPage.locator('#demo-cursor').isVisible(), true);
-  const firstPointer = await autoPage.locator('#demo-cursor').boundingBox();
-  await autoPage.waitForTimeout(200);
-  const nextPointer = await autoPage.locator('#demo-cursor').boundingBox();
-  assert.ok(Math.hypot(nextPointer.x - firstPointer.x, nextPointer.y - firstPointer.y) > 2, 'the cursor visibly travels to the actual control');
+  await autoPage.waitForFunction(() => {
+    const points = window.siteTestCursorTrajectory;
+    return points.some(point => Math.hypot(point.x - points[0].x, point.y - points[0].y) > 2);
+  });
+  const trajectory = await autoPage.evaluate(() => window.siteTestCursorTrajectory);
+  assert.ok(trajectory.some(point => Math.hypot(point.x - trajectory[0].x, point.y - trajectory[0].y) > 2), 'the cursor visibly travels to the actual control');
   await autoPage.locator('#demo-cursor[data-phase="click"]').waitFor();
   const cursorPoint = await autoPage.locator('#demo-cursor').boundingBox();
   const demoWindow = await autoPage.locator('#demo-panel').boundingBox();

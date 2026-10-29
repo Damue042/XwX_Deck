@@ -64,13 +64,15 @@ npm run test:site
 
 ## 下载与发布
 
-Windows x64、macOS Apple Silicon 与 Intel 默认使用 GitHub 最新 Release 制品链接。
+当前新仓库尚无安装包。主入口和 Windows 入口打开新仓库发布页，并明确标注尚未发布。
+两种 macOS 入口暂不可用，不提供失效下载链接。
+核实安装包后，在 `DOWNLOADS` 中填写对应地址；浏览器只推荐已配置的架构。
 下载指向实际已发布制品，不以网页更新表示软件更新已发布。
 仅填写已发布并核实的制品地址。
 网页不宣称尚未发布的版本已经可用。
 
 GitHub Pages 工作流先构建并验证官网。
-文档发布在 `/docs/`。
+文档发布在站点的 `docs/` 目录。构建使用 Pages 提供的路径，支持独立域名和仓库子路径。
 站点绑定 `xwxdeck.com`，Cloudflare 管理 DNS。
 下载包继续托管在 GitHub Releases。
 下载入口仅在首屏展示。

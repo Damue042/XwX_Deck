@@ -58,7 +58,7 @@ jobs:
 
       - name: Build documentation
         env:
-          DOCS_BASE: /docs/
+          DOCS_BASE: ${{ steps.pages.outputs.base_path }}/docs/
         run: npm run docs:build
 
       - name: Assemble website and documentation
@@ -66,6 +66,7 @@ jobs:
 
       - name: Verify documentation navigation and typography
         env:
+          XWX_SITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}
           XWX_PLAYWRIGHT_MODULE: ${{ runner.temp }}/site-browser/node_modules/playwright/index.mjs
           XWX_PLAYWRIGHT_CHANNEL: chromium
         run: npm run test:docs

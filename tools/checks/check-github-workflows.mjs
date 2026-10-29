@@ -86,7 +86,7 @@ check(parse(published).jobs.verify.strategy.matrix.os.includes('macos-15-intel')
 
 const pages = await readFile(path.join(workflowRoot, 'pages.yml'), 'utf8');
 check(pages.includes('deploy-pages'), 'Pages workflow must deploy with actions/deploy-pages');
-check(pages.includes('DOCS_BASE: /docs/'), 'Pages workflow must publish documentation beneath the website');
+check(pages.includes('DOCS_BASE: ${{ steps.pages.outputs.base_path }}/docs/') && pages.includes('XWX_SITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}'), 'Pages workflow must build and verify documentation beneath the actual website base path');
 check(pages.includes('npm run build:site') && pages.includes('npm run test:site') && pages.includes('path: test-results/site-preview'), 'Pages must build and verify the actual website before deployment');
 
 if (failures.length) {
