@@ -58,6 +58,8 @@ for (const name of ['site.css', 'fonts.css', 'language.js', 'demo-tour.js']) awa
 await cp(resolve(root, 'assets/fonts'), resolve(output, 'fonts'), { recursive: true });
 // The renderer emits content-addressed font files referenced by app.css.
 await cp(resolve(root, 'dist/renderer/fonts'), resolve(output, 'fonts'), { recursive: true });
+// Website-only display face; the packaged application keeps its own fonts.
+await cp(resolve(root, 'web/site/fonts'), resolve(output, 'fonts'), { recursive: true });
 await esbuild.build({
   entryPoints: [resolve(root, 'web/site/hero-field.tsx')], outfile: resolve(output, 'hero-field.js'),
   bundle: true, platform: 'browser', target: ['safari15', 'chrome120'], format: 'iife', jsx: 'automatic', minify: true,

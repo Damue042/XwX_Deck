@@ -277,3 +277,70 @@ html[data-hero-layout='brand'] .hero#download h1 > span { display: block; }
   html[data-hero-layout='brand'] .brand { font-size: 20px; }
   html[data-hero-layout='brand'] .brand .brand-mark { width: 26px; height: 26px; }
 }
+
+/* Type system after x.ai/bot: one variable family, two weights (400 and 500), pill buttons. */
+@font-face { font-family: "xVf"; src: url(fonts/xVf-Variable.woff2) format("woff2"); font-weight: 200 800; font-style: normal; font-display: swap; }
+@font-face { font-family: "xVf Fallback"; src: local(Arial); ascent-override: 90.56%; descent-override: 22.64%; line-gap-override: 0%; size-adjust: 106.01%; }
+:root {
+  --sans: "xVf", "xVf Fallback", "Noto Sans SC", system-ui, sans-serif;
+  --hero-font: var(--sans);
+  --ink: #0A0A0A; --graphite: #6E7177; --quiet: #6E7177;
+  --pill: #EDEDEB; --pill-hover: #E3E3E0;
+  --hero-weight: 500; --hero-tracking: -.01em; --hero-leading: 1.08;
+  --section-weight: 500; --section-tracking: -.01em; --section-leading: 1.15;
+  --body-weight: 400; --body-leading: 1.65;
+  --control-weight: 500;
+}
+html[data-hero-layout] .hero#download h1 { font-size: clamp(2.5rem, 4.4vw, 4rem); font-weight: var(--hero-weight); line-height: var(--hero-leading); letter-spacing: var(--hero-tracking); }
+.hero-description, html[data-hero-layout='center'] .hero-description { color: var(--graphite); font-size: 18px; line-height: 1.625; }
+.title h2, body:not([data-footer-layout='original']) .community .title h2 { font-size: clamp(28px, 2.6vw, 36px); }
+.safety h3 { font-size: 16px; font-weight: 500; letter-spacing: 0; line-height: 1.5; }
+.safety p { margin-top: 6px; font-size: 15px; line-height: 1.65; }
+.row h3 { font-size: 14px; font-weight: 500; letter-spacing: 0; color: var(--graphite); }
+.track li { font-size: 14px; }
+.demo-caption, .feature-copy { font-size: 16px; font-weight: 400; line-height: 1.625; }
+.community-copy { font-size: 18px; line-height: 1.625; }
+nav > a:not(.btn) { color: var(--ink); font-size: 14px; font-weight: 500; }
+nav > a:not(.btn):hover { color: var(--graphite); }
+.brand { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.features .seg button { font-size: 14px; font-weight: 500; }
+body:not([data-footer-layout='original']) .community-link { font-size: 15px; font-weight: 500; }
+footer { font-size: 13px; }
+.download-heading, .download-context, .chip-help, .download-history, .download-choice small, .download-file { font-size: 13px; }
+
+/* Pill actions centred as one group, as on x.ai. */
+.hero .download-actions { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 12px; }
+.download-main, html[lang] .download-main { width: auto; }
+.hero .btn.large, html[data-hero-layout='center'] .hero .btn.large { height: 44px; min-height: 44px; padding: 0 22px; border-radius: 999px; gap: 8px; font: 400 16px/1 var(--sans); }
+.hero .btn.large svg { width: 16px; height: 16px; }
+.download-options > summary, html[data-hero-layout='center'] .download-options > summary { min-height: 44px; padding: 0 20px; border-radius: 999px; background: var(--pill); color: var(--ink); font-size: 16px; transition: background .18s var(--ease); }
+.download-options > summary:hover, .download-options[open] > summary { background: var(--pill-hover); color: var(--ink); }
+.download-choices, html[lang] .download-choices { top: calc(100% + 10px); }
+
+/* Grid alignment: icon glyphs, not their hit areas, sit on the content edges. */
+/* 40px hit areas around 16px glyphs: a -12px margin puts the glyph edge on the column line. */
+nav .language-trigger { margin-inline: -12px; color: var(--ink); }
+nav .language-trigger svg { width: 16px; height: 16px; }
+.demo-playback button { width: 40px; height: 40px; padding: 0; color: var(--ink); }
+.demo-playback svg { width: 14px; height: 14px; }
+.features .demo-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 12px; }
+.features .seg { grid-column: 2; }
+.demo-playback { grid-column: 3; justify-self: end; margin-right: -13px; }
+/* Two feature columns share the client grid's fourth-column line. */
+.safety { width: 100%; gap: 48px 24px; column-gap: 24px; }
+.safety p { max-width: 32em; }
+@media (max-width: 760px) {
+  nav { gap: 20px; }
+  .features .demo-controls { grid-template-columns: minmax(0, 1fr) auto; }
+  .features .seg { grid-column: 1; justify-self: start; }
+  .demo-playback { grid-column: 2; }
+  .hero .btn.large, html[data-hero-layout='center'] .hero .btn.large, .download-options > summary, html[data-hero-layout='center'] .download-options > summary { height: 42px; min-height: 42px; padding: 0 18px; font-size: 15px; }
+  html[data-hero-layout] .hero#download h1 { font-size: clamp(2.25rem, 9vw, 2.75rem); }
+  .hero-description, html[data-hero-layout='center'] .hero-description { font-size: 16px; }
+  .title h2, body:not([data-footer-layout='original']) .community .title h2 { font-size: 28px; }
+  .demo-caption, .feature-copy { font-size: 15px; }
+}
+
+/* CJK reads cramped with negative tracking. */
+html[lang='zh-CN'] { --hero-tracking: 0em; --section-tracking: 0em; }
+html[lang='zh-CN'] .hero#download h1 { line-height: 1.18; }

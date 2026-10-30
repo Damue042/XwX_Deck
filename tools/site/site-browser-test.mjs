@@ -95,8 +95,12 @@ try {
     assert.equal(await primary.getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
     const primaryBox = await primary.boundingBox();
     const otherBox = await page.locator('#download-options > summary').boundingBox();
-    assert.ok(Math.abs(primaryBox.x + primaryBox.width / 2 - width / 2) < 1, 'primary download aligns with the page center independently of other versions');
-    assert.ok(otherBox.x > primaryBox.x + primaryBox.width && otherBox.x + otherBox.width <= width, 'other versions stays to the right without overflowing');
+    const sameRow = Math.abs(primaryBox.y - otherBox.y) < 1;
+    const groupLeft = Math.min(primaryBox.x, otherBox.x);
+    const groupRight = Math.max(primaryBox.x + primaryBox.width, otherBox.x + otherBox.width);
+    assert.ok(Math.abs((groupLeft + groupRight) / 2 - width / 2) < 1, 'download actions are centred as one group');
+    assert.ok(!sameRow || otherBox.x >= primaryBox.x + primaryBox.width, 'download choices follow the primary action');
+    assert.ok(groupLeft >= 0 && groupRight <= width && (sameRow || otherBox.y >= primaryBox.y + primaryBox.height), 'download group stays within the viewport and preserves action order');
     assert.equal(await page.locator('#download-caption').count(), 0);
     await page.locator('#download-options > summary').click();
     for (const target of ['windows', 'mac', 'macIntel']) assert.equal(await page.locator(`[data-download="${target}"]`).isVisible(), true);
@@ -256,7 +260,8 @@ try {
   assert.equal(await page.locator('header nav a').count(), 1);
   assert.equal(await page.locator('.preview-tools').count(), 0);
   assert.equal(await page.locator('.community-copy').innerText(), '欢迎交流使用体验');
-  assert.match(await page.locator('body').evaluate(el => getComputedStyle(el).fontFamily), /Urbanist.*Noto Sans SC/);
+  assert.match(await page.locator('body').evaluate(el => getComputedStyle(el).fontFamily), /xVf.*Noto Sans SC/);
+  assert.equal(await page.evaluate(async () => { await document.fonts.load('400 16px xVf'); await document.fonts.load('500 16px xVf'); return document.fonts.check('400 16px xVf') && document.fonts.check('500 16px xVf'); }), true, 'both website font weights load from the copied resource');
   checks.push('WE02: unpublished Windows links open the new release page; both Mac architectures are unavailable; no broken asset links are exposed');
   await page.goto(url + '/configured/index.html', { waitUntil: 'networkidle' });
   const download = page.waitForEvent('download');

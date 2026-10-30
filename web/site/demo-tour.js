@@ -36,8 +36,8 @@
     button.setAttribute('aria-label', label);
     button.title = label;
     button.innerHTML = controller
-      ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6v12M16 6v12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>'
-      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 10 7-10 7z" fill="currentColor"/></svg>';
+      ? '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5.5 2.5v11M14.25 2.5v11" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>'
+      : '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 1.3 15.4 8 3.2 14.7Z" fill="currentColor"/></svg>';
     button.setAttribute('aria-pressed', String(!!controller));
     button.dataset.state = controller ? 'playing' : status === 'demoDone' ? 'done' : status === 'demoStopped' ? 'stopped' : status === 'demoFailed' ? 'failed' : 'idle';
     const sentence = caption();

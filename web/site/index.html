@@ -7,6 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <script>(() => { const layout = new URLSearchParams(location.search).get('hero-layout'); document.documentElement.dataset.heroLayout = ['compact', 'split', 'brand'].includes(layout) ? layout : 'center'; })();</script>
+<link rel="preload" href="./fonts/xVf-Variable.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="./fonts.css" media="print" onload="this.media='all'">
 <noscript><link rel="stylesheet" href="./fonts.css"></noscript>
 <title data-i18n="title">XwX Deck</title>
@@ -147,7 +148,7 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; }
       <a href="./docs/" data-i18n="docs">文档</a>
       <div class="language-picker" hidden>
         <button id="language-trigger" class="language-trigger" type="button" aria-label="选择语言" data-i18n-aria-label="language" title="选择语言" data-i18n-title="language" aria-haspopup="menu" aria-expanded="false" aria-controls="language-menu">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a17 17 0 0 1 0 18 17 17 0 0 1 0-18Z"/></svg>
+          <svg viewBox="2 2 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.25"/><path d="M2.75 12h18.5M12 2.75a14.5 14.5 0 0 1 0 18.5 14.5 14.5 0 0 1 0-18.5Z"/></svg>
         </button>
         <div id="language-menu" class="language-menu" role="menu" aria-label="选择语言" data-i18n-aria-label="language" hidden>
           <button type="button" role="menuitemradio" aria-checked="true" data-language="zh-CN" lang="zh-CN" tabindex="-1"><span>简体中文</span><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m3 8 3 3 7-7"/></svg></button>
@@ -206,7 +207,7 @@ footer .wrap { display: flex; justify-content: space-between; gap: 16px; }
         <button id="tab-dashboard" role="tab" aria-label="查看仪表盘" data-i18n-aria-label="dashboard" aria-controls="demo-panel" aria-selected="false" tabindex="-1" data-page="dashboard" data-copy="查看脱敏的真实对话，了解各次请求的上下文、工具调用和用量。" data-i18n-data-copy="dashboardCopy"><span data-i18n="requestsShort">请求记录</span></button>
       </div>
       <p class="visually-hidden" id="feature-copy" data-i18n="modelsCopy">选好服务和模型，Deck 会写好客户端配置。</p>
-      <div class="demo-playback"><button type="button" id="demo-play" aria-label="播放演示" title="播放演示" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 10 7-10 7z" fill="currentColor" stroke="none"/></svg></button></div>
+      <div class="demo-playback"><button type="button" id="demo-play" aria-label="播放演示" title="播放演示" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 1.3 15.4 8 3.2 14.7Z" fill="currentColor"/></svg></button></div>
       </div>
       <div class="window" id="demo-panel" data-src="app.html?trace-live=1#models" role="tabpanel" aria-labelledby="tab-models">
         <iframe id="app-demo" title="XwX Deck 功能演示" data-i18n-title="appPreview" loading="lazy"></iframe>
