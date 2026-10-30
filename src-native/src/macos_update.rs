@@ -10,6 +10,62 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 type Result<T> = std::result::Result<T, String>;
+#[path = "macos_update_health.rs"]
+mod health;
+static HEALTH_CLIENT: std::sync::Mutex<Option<health::Client>> = std::sync::Mutex::new(None);
+
+pub fn notify_starting() -> Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    let Some(index) = args.iter().position(|a| a == "--update-health-socket") else {
+        return Ok(());
+    };
+    let socket = PathBuf::from(args.get(index + 1).ok_or("缺少更新健康通道")?);
+    let helper_index = args
+        .iter()
+        .position(|a| a == "--update-health-helper")
+        .ok_or("缺少更新助手身份")?;
+    let helper = PathBuf::from(args.get(helper_index + 1).ok_or("缺少更新助手路径")?);
+    let app = current_app()?;
+    let directory = helper.parent().ok_or("更新助手目录无效")?;
+    if helper.file_name().is_none_or(|s| s != "update-helper")
+        || directory.parent() != app.parent()
+        || directory
+            .file_name()
+            .is_none_or(|s| !s.to_string_lossy().starts_with(".xwx-update-"))
+        || socket.file_name().is_none_or(|s| s != "health.sock")
+        || fs::canonicalize(&helper).map_err(|e| e.to_string())? != helper
+    {
+        return Err("更新健康通道路径无效".into());
+    }
+    let id = plist(&app, "CFBundleIdentifier")?;
+    let req = format!("=anchor apple generic and identifier \"{id}.update-helper\" and certificate leaf[subject.OU] = \"{}\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists", team());
+    requirement(&id)?;
+    run(
+        "/usr/bin/codesign",
+        &[
+            "--verify".as_ref(),
+            "--strict".as_ref(),
+            "-R".as_ref(),
+            req.as_ref(),
+            helper.as_os_str(),
+        ],
+    )?;
+    // The signed bundle is the installed update version. Validation bundles
+    // deliberately use versions distinct from the Cargo package version.
+    let version = current_version().ok_or("缺少当前应用版本")?;
+    let client = health::Client::connect(&socket, &version, &helper)?;
+    *HEALTH_CLIENT.lock().map_err(|_| "健康通道锁不可用")? = Some(client);
+    Ok(())
+}
+
+pub fn notify_ready() -> Result<()> {
+    let mut client = HEALTH_CLIENT.lock().map_err(|_| "健康通道锁不可用")?;
+    if let Some(client) = client.as_mut() {
+        client.ready()?;
+    }
+    *client = None;
+    Ok(())
+}
 
 fn run(command: &str, args: &[&std::ffi::OsStr]) -> Result<String> {
     let output = Command::new(command)
@@ -160,6 +216,10 @@ fn idle_policy(hour: u32, seconds: f64) -> bool {
     (2..5).contains(&hour) && seconds.is_finite() && seconds >= 900.0
 }
 pub fn idle_for_nightly() -> bool {
+    #[cfg(feature = "update-validation")]
+    if let Some((hour, seconds)) = crate::update_validation::night_clock() {
+        return idle_policy(hour, seconds);
+    }
     use chrono::Timelike;
     #[link(name = "CoreGraphics", kind = "framework")]
     unsafe extern "C" {
@@ -199,9 +259,13 @@ pub fn discard(job: Job) {
     }
 }
 pub fn prepare(dmg: &Path, expected: &str, root: &Path) -> Result<Job> {
+    #[cfg(feature = "update-validation")]
+    crate::update_validation::guard_root(root)?;
     version(expected)?;
     let target = current_app()?;
     let id = plist(&target, "CFBundleIdentifier")?;
+    #[cfg(feature = "update-validation")]
+    crate::update_validation::guard_app(&target, &id, root)?;
     verify(&target, &id, false)?;
     let old_version = plist(&target, "CFBundleShortVersionString")?;
     if version(expected)? <= version(&old_version)? {
@@ -291,7 +355,10 @@ pub fn prepare(dmg: &Path, expected: &str, root: &Path) -> Result<Job> {
         let args = std::env::args().collect::<Vec<_>>();
         let restart_args = if args.iter().any(|a| a == "--pilot-root") {
             let mut result = vec!["--pilot-root".into(), root.to_string_lossy().into_owned()];
-            if args.iter().any(|a| a == "--smoke-macos-update") {
+            if args
+                .iter()
+                .any(|a| a == "--smoke-macos-update" || a == "--smoke-nightly-update")
+            {
                 result.push("--smoke-update-restarted".into());
             }
             result
@@ -330,8 +397,38 @@ pub fn launch(job: Job) -> Result<()> {
         .map_err(|e| e.to_string())?;
     Ok(())
 }
-fn apply(job: &Job) -> Result<()> {
+#[derive(Default)]
+struct ApplyState {
+    swap_performed: bool,
+    restart_requested: bool,
+    startup_verified: bool,
+    data_access_granted: bool,
+    ready_pid: Option<u32>,
+}
+fn swap_apps(first: &Path, second: &Path) -> Result<()> {
+    unsafe extern "C" {
+        fn renamex_np(
+            from: *const std::ffi::c_char,
+            to: *const std::ffi::c_char,
+            flags: u32,
+        ) -> i32;
+    }
+    let first = std::ffi::CString::new(first.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    let second =
+        std::ffi::CString::new(second.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+    if unsafe { renamex_np(first.as_ptr(), second.as_ptr(), 2) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(())
+}
+
+fn apply(job: &Job, state: &mut ApplyState) -> Result<()> {
     regular_app(&job.target)?;
+    #[cfg(feature = "update-validation")]
+    {
+        crate::update_validation::guard_root(&job.root)?;
+        crate::update_validation::guard_app(&job.target, &job.bundle_id, &job.root)?;
+    }
     let directory = job.helper.parent().ok_or("无效更新目录")?;
     if std::env::current_exe().map_err(|e| e.to_string())? != job.helper
         || directory.parent() != job.target.parent()
@@ -380,32 +477,56 @@ fn apply(job: &Job) -> Result<()> {
     if plist(&job.staged, "CFBundleShortVersionString")? != job.version {
         return Err("待安装应用版本已变化".into());
     }
-    unsafe extern "C" {
-        fn renamex_np(
-            from: *const std::ffi::c_char,
-            to: *const std::ffi::c_char,
-            flags: u32,
-        ) -> i32;
+    let executable = job
+        .target
+        .join("Contents/MacOS")
+        .join(env!("CARGO_PKG_NAME"));
+    if health::executable_in_use(&executable)? {
+        return Err("仍有应用进程使用目标程序，未替换".into());
     }
-    let from =
-        std::ffi::CString::new(job.staged.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
-    let to =
-        std::ffi::CString::new(job.target.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
-    // RENAME_SWAP: both bundles change names in one filesystem operation.
-    if unsafe { renamex_np(from.as_ptr(), to.as_ptr(), 2) } != 0 {
+    let expected = health::digest(
+        &job.staged
+            .join("Contents/MacOS")
+            .join(env!("CARGO_PKG_NAME")),
+    )?;
+    let mut monitor = health::Monitor::create(executable.clone(), expected, job.version.clone())?;
+    swap_apps(&job.staged, &job.target).map_err(|e| format!("应用替换失败，原版本保留：{e}"))?;
+    state.swap_performed = true;
+    let launched = open_app(job, Some(monitor.path()));
+    state.restart_requested = launched.is_ok();
+    let confirmed = match launched {
+        Ok(()) => monitor.wait(Duration::from_secs(60)),
+        Err(error) => Err(error),
+    };
+    state.data_access_granted = monitor.data_access_granted;
+    state.ready_pid = monitor.ready_pid;
+    state.startup_verified = confirmed.is_ok();
+    // Close the failed task channel. A delayed flagged launch must fail its
+    // pre-data handshake instead of being mistaken for a later recovery.
+    drop(monitor);
+    if let Err(error) = confirmed {
+        // Normal launches do not yet share an update admission lock. A one-time
+        // process scan cannot exclude another launch between the scan and swap,
+        // nor prove no data was changed by a process which already exited.
+        // Keep both bundles instead of automatically downgrading user data.
         return Err(format!(
-            "应用替换失败，原版本保留：{}",
-            std::io::Error::last_os_error()
+            "新版启动未确认，两份应用已保留；请核对数据兼容后手动恢复：{error}"
         ));
     }
-    open_app(job)?;
     Ok(())
 }
-fn open_app(job: &Job) -> Result<()> {
+fn open_app(job: &Job, health: Option<&Path>) -> Result<()> {
     let mut command = Command::new("/usr/bin/open");
     command.arg("-n").arg(&job.target);
-    if !job.restart_args.is_empty() {
+    if !job.restart_args.is_empty() || health.is_some() {
         command.arg("--args").args(&job.restart_args);
+    }
+    if let Some(socket) = health {
+        command
+            .arg("--update-health-socket")
+            .arg(socket)
+            .arg("--update-health-helper")
+            .arg(&job.helper);
     }
     let output = command
         .output()
@@ -434,12 +555,16 @@ pub fn worker() -> Option<i32> {
             return Err("更新任务过长".into());
         }
         let job: Job = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
-        let applied = apply(&job);
+        let mut state = ApplyState::default();
+        let applied = apply(&job, &mut state);
         let installed = plist(&job.target, "CFBundleShortVersionString")
             .ok()
             .as_deref()
             == Some(&job.version);
-        let report = serde_json::json!({"status":if applied.is_ok(){"completed"}else{"error"},"version":job.version,"installed":installed,"restartRequested":applied.is_ok(),"error":applied.as_ref().err(),"application":job.target});
+        // `open` only acknowledges a LaunchServices request. It does not prove
+        // the new process reached a working renderer. Retain the swapped-out
+        // application until a separately verified acceptance/cleanup step.
+        let report = serde_json::json!({"status":if state.startup_verified{"completed"}else{"error"},"version":job.version,"installed":installed,"restartRequested":state.restart_requested,"startupVerified":state.startup_verified,"startupPid":state.ready_pid,"dataAccessGranted":state.data_access_granted,"rollbackPerformed":false,"manualRecoveryRequired":state.swap_performed && !state.startup_verified,"backupApplication":job.staged,"backupRole":if state.swap_performed{"previous-application"}else{"staged-candidate"},"backupRetained":job.staged.is_dir(),"error":applied.as_ref().err(),"application":job.target});
         let report_path = job.root.join("updates/macos-install-result.json");
         fs::create_dir_all(report_path.parent().unwrap()).map_err(|e| e.to_string())?;
         fs::write(
@@ -447,9 +572,7 @@ pub fn worker() -> Option<i32> {
             serde_json::to_vec_pretty(&report).map_err(|e| e.to_string())?,
         )
         .map_err(|e| e.to_string())?;
-        if applied.is_ok() {
-            let _ = fs::remove_dir_all(helper.parent().unwrap());
-        } else if !installed {
+        if applied.is_err() && !installed {
             unsafe extern "C" {
                 fn kill(pid: i32, signal: i32) -> i32;
             }
@@ -463,7 +586,7 @@ pub fn worker() -> Option<i32> {
                     .as_deref()
                     == Some(&job.old_version)
             {
-                let _ = open_app(&job);
+                let _ = open_app(&job, None);
             }
         }
         applied
@@ -477,6 +600,44 @@ pub fn worker() -> Option<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn isolated_atomic_swap_and_controlled_undo_preserve_synthetic_data() {
+        let directory = std::fs::canonicalize(std::env::temp_dir())
+            .unwrap()
+            .join(format!(
+                "xwx-recovery-{}-{}",
+                std::process::id(),
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+        fs::create_dir(&directory).unwrap();
+        let target = directory.join("target.app");
+        let backup = directory.join("previous.app");
+        fs::create_dir(&target).unwrap();
+        fs::create_dir(&backup).unwrap();
+        // Synthetic files only: these are never executed and are not signed apps.
+        fs::write(target.join("fixture"), b"new").unwrap();
+        fs::write(backup.join("fixture"), b"old").unwrap();
+        let data = directory.join("synthetic-user-data");
+        fs::write(&data, "retained 正文😀").unwrap();
+        let data_hash = health::digest(&data).unwrap();
+        swap_apps(&target, &backup).unwrap();
+        assert_eq!(fs::read(target.join("fixture")).unwrap(), b"old");
+        assert_eq!(fs::read(backup.join("fixture")).unwrap(), b"new");
+        assert_eq!(health::digest(&data).unwrap(), data_hash);
+        // A real filesystem failure leaves both directories unchanged.
+        assert!(swap_apps(&target, &directory.join("missing.app")).is_err());
+        assert_eq!(fs::read(target.join("fixture")).unwrap(), b"old");
+        assert_eq!(fs::read(backup.join("fixture")).unwrap(), b"new");
+        // This controlled undo is a unit fixture, not automatic app recovery.
+        swap_apps(&target, &backup).unwrap();
+        assert_eq!(fs::read(target.join("fixture")).unwrap(), b"new");
+        assert_eq!(fs::read(backup.join("fixture")).unwrap(), b"old");
+        assert_eq!(health::digest(&data).unwrap(), data_hash);
+        fs::remove_dir_all(directory).unwrap();
+    }
     #[test]
     fn unattended_update_requires_night_window_and_fifteen_idle_minutes() {
         assert!(idle_policy(2, 900.0));

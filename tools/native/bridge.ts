@@ -23,10 +23,6 @@ const rpc = async (method: string, args: any[] = []) => {
   if (value && typeof value.fullscreen === 'boolean') publish('window', { ...windowState, ...value });
   return value;
 };
-// The renderer emits this only after committing its shell and receiving native state.
-window.addEventListener('xwxdeck:startup-ready', () => {
-  if (platform === 'win32') void rpc('confirmUpdateStartup').catch(error => console.error('Update startup confirmation failed', error));
-}, { once: true });
 const methods = [
   'previewConfigurationImport', 'importConfigurations', 'chooseConfigurationImportFile',
   'getModelClients', 'addModelClient', 'removeModelClient', 'detectClientInstallations',
@@ -41,7 +37,7 @@ const methods = [
   'updateCodexConfig', 'setModelService', 'refresh', 'disableBreaksCodex',
   'minimizeWindow', 'toggleFullscreen', 'toggleMaximize', 'setManagerView', 'closeWindow', 'confirmApplicationExit', 'acknowledgeApplicationResetResult',
   'moveWindowStart', 'moveWindow', 'moveWindowEnd', 'resizeWindowStart', 'resizeWindowMove', 'resizeWindowEnd',
-  'openSetupWebsite', 'checkForUpdates', 'downloadUpdate', 'restartAndInstall', 'cancelUpdate',
+  'openSetupWebsite', 'checkForUpdates', 'downloadUpdate', 'restartAndInstall', 'cancelUpdate', 'confirmUpdateStartup',
   'setStartupEnabled', 'chooseTraceBackground', 'clearTraceBackground', 'repairApplication', 'migrateWebCryptoKey',
   'repairUnreadableSettings', 'repairInvalidCodexConfiguration', 'repairClientProviderSwitch', 'getBackupHistory', 'openBackupFolder', 'restoreBackup',
   'resetApplication', 'getApplicationResetResult', 'updateCodexEnhancements', 'updateClaudeModels', 'updateClaudeDesktopSync',

@@ -6,10 +6,28 @@ import { t } from '@/lib/i18n';
 import { userErrorMessage } from '@/lib/errors';
 
 export function NativeLifecycleActions(): null {
-  const { api, booted } = useBridge();
+  const { api, booted, runtime, loadIssues } = useBridge();
   const confirm = useConfirm();
   const exitPending = React.useRef(false);
   const resetSeen = React.useRef(false);
+  const startupConfirmed = React.useRef(false);
+  const startupPending = React.useRef(false);
+  React.useEffect(() => {
+    if (!booted || !runtime || loadIssues.length || startupConfirmed.current || startupPending.current || !api.confirmUpdateStartup) return;
+    // A mounted shell plus a successful backend snapshot is stronger than an
+    // HTML load event. Do not acknowledge a blank or failed initial renderer.
+    // Effects run after the React commit. Do not require a painted animation
+    // frame: a legitimate unattended update may start while the Mac is locked.
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      startupPending.current = true;
+      void api.confirmUpdateStartup?.().then(() => { startupConfirmed.current = true; }).catch(error => {
+        if (!cancelled) showToast(t('无法确认更新启动'), 'error', 'update-startup-confirmation', { description: userErrorMessage(error) });
+      }).finally(() => { startupPending.current = false; });
+    });
+    return () => { cancelled = true; };
+  }, [api, booted, runtime, loadIssues]);
   React.useEffect(() => {
     const clipboardError = (event: Event) => showToast((event as CustomEvent<string>).detail, 'error', 'clipboard-error');
     const validationError = (event: Event) => {

@@ -603,10 +603,10 @@ fn restore_codex_fields(
             .and_then(|p| p.get(id))
             .is_none()
             && current
-            .get("model_providers")
-            .and_then(|p| p.get(id))
-            .and_then(Item::as_table_like)
-            .is_some_and(|t| t.is_empty())
+                .get("model_providers")
+                .and_then(|p| p.get(id))
+                .and_then(Item::as_table_like)
+                .is_some_and(|t| t.is_empty())
         {
             if let Some(table) = current
                 .get_mut("model_providers")
@@ -649,9 +649,15 @@ fn codex_external_change(
             && provider_field(expected, provider, "requires_openai_auth").and_then(Item::as_bool)
                 == Some(true)
     };
-    ["model", "model_provider", "model_context_window", "openai_base_url", "chatgpt_base_url"]
-        .iter()
-        .any(|key| semantic(current.get(key)) != semantic(expected.get(key)))
+    [
+        "model",
+        "model_provider",
+        "model_context_window",
+        "openai_base_url",
+        "chatgpt_base_url",
+    ]
+    .iter()
+    .any(|key| semantic(current.get(key)) != semantic(expected.get(key)))
         || CODEX_PROVIDER_FIELDS.iter().any(|key| {
             !(*key == "requires_openai_auth" && migrated_auth(id))
                 && semantic(provider_field(current, id, key))
@@ -1008,6 +1014,15 @@ impl Pilot {
     pub fn renderer_preferences_problem(&mut self, problem: &str) {
         self.renderer_preferences_problem = Some(problem.to_owned());
     }
+    #[cfg(feature = "update-validation")]
+    pub fn update_validation_history(&self, seed: bool) -> Result<Value> {
+        crate::update_validation::guard_root(&self.root)?;
+        let mut store = self.store.lock().map_err(err)?;
+        if seed {
+            store.append(json!({"id":"update-retained-trace","source":"codex-cli","startedAt":"2026-10-29T00:00:00Z","request":{"model":"update-fixture","body":{"input":"Retained update request 正文😀"}},"response":{"statusCode":200,"body":{"output_text":"Retained update response 正文😀".repeat(2048)}},"usage":{"inputTokens":3,"outputTokens":4,"totalTokens":7}}),"update-integrity-fixture")?;
+        }
+        Ok(store.state(false))
+    }
     pub fn trace_root(&self) -> PathBuf {
         if self.settings.trace_root.is_empty() {
             self.root.join("traces")
@@ -1236,7 +1251,11 @@ impl Pilot {
             .and_then(|t| t.get(provider))
             .and_then(|p| p.get("base_url"))
             .and_then(Item::as_str)
-            .or_else(|| (provider == "openai").then(|| d.get("openai_base_url").and_then(Item::as_str)).flatten())
+            .or_else(|| {
+                (provider == "openai")
+                    .then(|| d.get("openai_base_url").and_then(Item::as_str))
+                    .flatten()
+            })
             .unwrap_or("");
         let selected = self.selected();
         let using_selected = selected.is_some_and(|p| {
@@ -1593,6 +1612,11 @@ impl Pilot {
                 }
             }
         }
+        // Reapplying an unchanged route must preserve the original bytes,
+        // including key order and comments, before Trace journals its baseline.
+        if semantic(Some(d.as_item())) == semantic(Some(doc(&before)?.as_item())) {
+            d = doc(&before)?;
+        }
         let managed = direct_provider.is_some()
             || self.settings.codex_enhancements["unifySessionHistory"] == true
             || resume_alias;
@@ -1769,36 +1793,59 @@ impl Pilot {
             } else if self.preserve_official_login() {
                 let p = provider.as_ref().unwrap();
                 set_codex_field(&mut managed, "model_provider", value("openai"));
-                set_codex_field(&mut managed, "openai_base_url", value(format!("http://127.0.0.1:{port}/v1")));
+                set_codex_field(
+                    &mut managed,
+                    "openai_base_url",
+                    value(format!("http://127.0.0.1:{port}/v1")),
+                );
                 set_codex_field(&mut managed, "model", value(&p.codex_model));
                 if p.codex_context_window > 0 {
-                    set_codex_field(&mut managed, "model_context_window", value(p.codex_context_window as i64));
+                    set_codex_field(
+                        &mut managed,
+                        "model_context_window",
+                        value(p.codex_context_window as i64),
+                    );
                 } else {
                     managed.remove("model_context_window");
                 }
                 if p.subscription_account_id.is_empty() {
                     if managed.get("web_search").is_none()
                         && !["responses", "openai-responses"].contains(
-                            &resolve_wire(&self.root, p, Some(&p.codex_model), "responses").as_str(),
+                            &resolve_wire(&self.root, p, Some(&p.codex_model), "responses")
+                                .as_str(),
                         )
                     {
                         set_codex_field(&mut managed, "web_search", value("disabled"));
                     }
                     let catalog_path = self.codex_home().join(crate::edition::config::CATALOG_FILE);
-                    if managed.get("model_catalog_json").and_then(Item::as_str)
+                    if managed
+                        .get("model_catalog_json")
+                        .and_then(Item::as_str)
                         .is_some_and(|path| Path::new(path) != catalog_path)
                     {
                         return Err("外部模型目录已保留，请先明确接管后再开启 Trace".into());
                     }
                     self.publish_codex_catalog(
                         p,
-                        self.local_catalog(p)?.as_array().map(Vec::as_slice).unwrap_or(&[]),
+                        self.local_catalog(p)?
+                            .as_array()
+                            .map(Vec::as_slice)
+                            .unwrap_or(&[]),
                         true,
                     )?;
-                    set_codex_field(&mut managed, "model_catalog_json", value(catalog_path.to_string_lossy().to_string()));
+                    set_codex_field(
+                        &mut managed,
+                        "model_catalog_json",
+                        value(catalog_path.to_string_lossy().to_string()),
+                    );
                 }
                 if self.owns_codex_resume_alias(&doc(&before)?)? {
-                    set_codex_provider_field(&mut managed, "xwx_deck", "base_url", value(format!("http://127.0.0.1:{port}/v1")));
+                    set_codex_provider_field(
+                        &mut managed,
+                        "xwx_deck",
+                        "base_url",
+                        value(format!("http://127.0.0.1:{port}/v1")),
+                    );
                 }
             } else {
                 let gateway_provider = "xwx_deck";
@@ -2066,9 +2113,14 @@ impl Pilot {
             return Ok(());
         }
         let forwarding = gateway_forwarding::Bindings::capture(self);
-        let (provider, claude) = self.prepare_routes(true).await?;
+        // Claim exclusive Trace ownership before preparing or rewriting any
+        // client route. A competing window must fail with its bytes untouched.
         self.store.lock().map_err(err)?.begin_writer()?;
-        let result = self.start_gateway(provider, claude, forwarding).await;
+        let result = async {
+            let (provider, claude) = self.prepare_routes(true).await?;
+            self.start_gateway(provider, claude, forwarding).await
+        }
+        .await;
         if result.is_err() && self.gateway.is_none() {
             self.store.lock().map_err(err)?.end_writer();
         }
@@ -4383,7 +4435,8 @@ mod config_merge_tests {
                 "model_provider = \"openai\"\nmodel = \"original\"\n{original_url}# user settings\n"
             );
             let managed = "model_provider = \"openai\"\nmodel = \"relay\"\nopenai_base_url = \"http://127.0.0.1:59233/v1\"\n# user settings\n".to_string();
-            let current = managed.replace("# user settings", "# latest comment\ncustom_option = true");
+            let current =
+                managed.replace("# user settings", "# latest comment\ncustom_option = true");
             let restored = restore_codex_fields(&current, &before, &managed, false).unwrap();
             let restored_doc = doc(&restored).unwrap();
             assert_eq!(restored_doc["model_provider"].as_str(), Some("openai"));
@@ -4396,7 +4449,10 @@ mod config_merge_tests {
             assert_eq!(restored_doc["custom_option"].as_bool(), Some(true));
             let external = managed.replace("59233", "59999");
             assert!(codex_external_change(
-                &doc(&external).unwrap(), &doc(&managed).unwrap(), "openai", false
+                &doc(&external).unwrap(),
+                &doc(&managed).unwrap(),
+                "openai",
+                false
             ));
             assert!(restore_codex_fields(&external, &before, &managed, false).is_err());
         }

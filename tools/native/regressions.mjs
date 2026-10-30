@@ -53,6 +53,7 @@ const pass = name => { checks.push(name); console.log(`PASS ${name}`); };
 start();
 try {
   await clearFreshCompatibleFixture(rpc);
+  await rpc('updateCodexEnhancements',{preserveOfficialLogin:false});
   const initial = await rpc('getState'); assert.equal(initial.traceWarningGB, 1); assert.equal(initial.traceAutoCleanup, true); pass('empty registry and 1 GB automatic cleanup defaults');
   await rpc('saveProvider', { displayName: 'Local_Test', baseUrl: base, bearerToken: 'pilot-test-key', adapter: 'responses', codexModel: 'pilot-model' });
   await rpc('switchClientProvider', { client: 'codex', providerId: 'Local_Test' });

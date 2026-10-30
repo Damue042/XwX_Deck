@@ -1,9 +1,9 @@
 (async () => {
   const checks = [];
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-  const wait = async (test, label) => {
+  const wait = async (test, label, attempts = 100) => {
     void window.__TAURI__.core.invoke('pilot_smoke_progress', { checks: [...checks], pending: label }).catch(() => {});
-    for (let i = 0; i < 100; i++) { if (await test()) return; await delay(100); }
+    for (let i = 0; i < attempts; i++) { if (await test()) return; await delay(100); }
     throw new Error(`Timed out: ${label}; viewport=${innerWidth}x${innerHeight}; page=${document.querySelector('.page.current')?.id}; clients=${JSON.stringify([...document.querySelectorAll('[data-client-tab]')].map(tab=>({id:tab.dataset.clientTab,selected:tab.getAttribute('aria-selected')})))}; dialogs=${JSON.stringify([...document.querySelectorAll('[role=dialog]:not([data-position])')].map(dialog=>dialog.id))}`);
   };
   const check = (label, value) => { if (!value) throw new Error(label); checks.push(label); void window.__TAURI__.core.invoke('pilot_smoke_progress', {checks: [...checks]}).catch(() => {}); };
@@ -39,6 +39,9 @@
   }
   try {
     await wait(() => document.querySelector('#captureBtn') && window.xwxDeck, 'production renderer');
+    // Give an authorized native UI controller time to raise this exact test
+    // window. The focus assertion still must hold; other waits remain unchanged.
+    await wait(() => document.hasFocus(), 'native foreground window before keyboard-focus acceptance', 600);
     for (const [family, sample] of [['Urbanist', 'Windows model'], ['Noto Sans SC', '模型请求']]) {
       const loaded = await document.fonts.load(`400 14px "${family}"`, sample);
       check(`native manager loads bundled ${family} glyphs offline`, loaded.length > 0 && loaded.every(face => face.status === 'loaded'));
@@ -53,7 +56,7 @@
         const setup=document.querySelector('#onboarding-setup');
         const actions=[...setup.querySelectorAll('.onboarding-top button,.onboarding-start,.onboarding-foot button')].filter(button=>button.getBoundingClientRect().height>0);
         check(`onboarding step ${step} actions fit ${width}x${height}`,actions.length>=2 && actions.every(button=>{const r=button.getBoundingClientRect();const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth&&(hit===button||button.contains(hit));}));
-        check(`onboarding step ${step} focuses inside its modal at ${width}x${height}`,setup.contains(document.activeElement));
+        check(`onboarding step ${step} focuses inside its modal at ${width}x${height}; active=${document.activeElement?.tagName}#${document.activeElement?.id}; documentFocus=${document.hasFocus()}; visibleHeading=${setup.querySelector('.onboarding-step:not([hidden]) h1')?.getBoundingClientRect().height}`,setup.contains(document.activeElement));
       }
     };
     await checkOnboardingLayout(0);
@@ -758,6 +761,7 @@
       await dismissToasts();
       document.querySelector('.rail [data-page="signal"]').click(); await delay(300);
       await window.xwxDeck.saveProvider({displayName:'Native_Second',baseUrl:context.upstream,bearerToken:'isolated-test-key',adapter:'responses',codexModel:'pilot-model'});
+      const directBeforeNativeTrace = await window.xwxDeck.getCodexConfig();
       document.querySelector('#captureBtn').click();
       await wait(() => document.querySelector('#captureBtn')?.getAttribute('aria-pressed') === 'true', 'native Trace enabled by existing dial');
       check('start Gateway through visible Trace control', (await window.xwxDeck.getState()).backgroundGatewayActive);
@@ -852,7 +856,11 @@
       await wait(() => document.querySelector('#captureBtn')?.getAttribute('aria-pressed') === 'false', 'native Trace stopped by existing dial');
       const stopped = await window.xwxDeck.getState();
       check('stop Gateway through visible Trace control', !stopped.backgroundGatewayActive && !stopped.tracingEnabled);
-      check('direct configuration restored', (await window.xwxDeck.getCodexConfig()).activeBaseUrl === context.upstream);
+      const directAfterNativeTrace = await window.xwxDeck.getCodexConfig();
+      check('direct configuration restores its exact pre-Trace route and authentication mode',
+        directAfterNativeTrace.activeBaseUrl === directBeforeNativeTrace.activeBaseUrl &&
+        directAfterNativeTrace.mode === directBeforeNativeTrace.mode &&
+        directAfterNativeTrace.authMode === directBeforeNativeTrace.authMode);
     }
     document.querySelector('.rail [data-page="signal"]').click(); await delay(300);
     document.querySelector('.rail [data-page="settings"]').click(); await delay(150);

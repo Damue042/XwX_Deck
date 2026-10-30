@@ -224,12 +224,15 @@
 
 | 脚本 | 执行入口 | 关联编号 |
 | --- | --- | --- |
+| [macos-update-validation-test.mjs](../tools/native/macos-update-validation-test.mjs) | 独立专题入口 | RE03、RE04、RE05 |
 | [portable-update-test.mjs](../tools/native/portable-update-test.mjs) | 后端默认入口 | RE02、RE03、RE04、RE05 |
 | [public-boundary-test.mjs](../tools/native/public-boundary-test.mjs) | 后端默认入口 | RE01 |
 | [source-fingerprint-test.mjs](../tools/native/source-fingerprint-test.mjs) | 后端默认入口 | RE01、RE02、RE03、RE04 |
+| [update-health-renderer-test.mjs](../tools/native/update-health-renderer-test.mjs) | test:built 入口 | RE03、RE04 |
 | [update-test.mjs](../tools/native/update-test.mjs) | 后端默认入口 | RE02、RE03、RE04、RE05 |
 | [windows-setup-test.mjs](../tools/native/windows-setup-test.mjs) | 独立专题入口 | RE02、RE03、RE05 |
 | [windows-setup-ui-test.mjs](../tools/native/windows-setup-ui-test.mjs) | 独立专题入口 | RE05 |
+| [keychain-signing-test.mjs](../tools/tests/keychain-signing-test.mjs) | test:built 入口 | RE02 |
 | [release-manifest-test.mjs](../tools/tests/release-manifest-test.mjs) | test:built 入口 | RE02 |
 
 ## SW 额度耗尽自动服务切换
@@ -276,4 +279,5 @@
 | [trace-compaction-test.mjs](../tools/native/trace-compaction-test.mjs) | 后端默认入口 |
 | [trace-provider-warning-test.mjs](../tools/native/trace-provider-warning-test.mjs) | 后端默认入口 |
 | [parity-test.mjs](../tools/shared-core/parity-test.mjs) | test:built 入口 |
+| [cloudflare-update-test.mjs](../tools/tests/cloudflare-update-test.mjs) | test:built 入口 |
 | [public-history-test.mjs](../tools/tests/public-history-test.mjs) | test:built 入口 |

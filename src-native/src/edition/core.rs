@@ -60,14 +60,6 @@ pub(super) fn catalog_clients(_kind: &str) -> Value {
 pub(super) fn optional_catalog_error(_p: &Provider, _error: &str) -> bool {
     false
 }
-pub(super) fn catalog_wire(
-    _p: &Provider,
-    _e: &Value,
-    _incoming: &str,
-    _default: &str,
-) -> Option<String> {
-    None
-}
 pub(super) fn model_cache_paths(_root: &Path) -> Vec<PathBuf> {
     vec![]
 }

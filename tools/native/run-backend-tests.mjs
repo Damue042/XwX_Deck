@@ -14,6 +14,7 @@ const suites = [
   "public-boundary-test.mjs",
   "source-fingerprint-test.mjs",
   "regressions.mjs",
+  "preserve-official-login-test.mjs",
   "credential-vault-test.mjs",
   "credential-private-files-test.mjs",
   "official-private-files-test.mjs",

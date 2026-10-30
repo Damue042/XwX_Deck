@@ -126,7 +126,7 @@ check(/connections:\s*vec!\[\s*\]/u.test(settings), 'native fresh registry must 
 check(/selected:\s*json!\(\s*\{\s*"codex"\s*:\s*null\s*,\s*"claude"\s*:\s*null\s*\}\s*\)/u.test(settings), 'native fresh client choices must be empty');
 check(/trace_warning_gb:\s*1\.0/u.test(settings) && /trace_auto_cleanup:\s*true/u.test(settings), 'native public retention defaults must be 1 GB with cleanup');
 check(core.includes('"getClaudeDesktopSync"') && core.includes('"updateClaudeDesktopSync"'), 'supported Desktop model integration must remain');
-const publicFeed = 'https://github.com/Damue042/XwX_Deck/releases/latest/download';
+const publicFeed = 'https://xwxdeck.com/updates/stable';
 check(contract.updates?.defaultServer === publicFeed && editionUpdate.includes(publicFeed), 'default update feed must remain public');
 check(!/events:\s*"https?:\/\//u.test(metadata), 'metadata events must have no built-in remote endpoint');
 check(/fn metadata_events\(\)\s*->\s*String\s*\{\s*String::new\(\)\s*\}/u.test(editionConfig) && metadata.includes("crate::edition::config::metadata_events()"), 'metadata push must default to an empty endpoint');

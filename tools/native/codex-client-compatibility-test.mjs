@@ -42,8 +42,8 @@ try{
  checks.push('models.dev capacity remains 1.05M while the current Codex default is 500K');
  native.models[0].context_window=600000;await writeFile(join(home,'models_cache.json'),JSON.stringify(native));
  entries=await app.rpc('fetchProviderModels',{providerId:'relay',refresh:false});assert.equal(entries.find(x=>x.id==='gpt-6.1-sol').codexContextWindow,600000);
- providerWindow=128000;entries=await app.rpc('fetchProviderModels',{providerId:'relay',refresh:true});assert.equal(entries.find(x=>x.id==='gpt-6.1-sol').codexContextWindow,128000);
- checks.push('client metadata refresh changes the default; explicit service limits still take precedence');
+ providerWindow=128000;entries=await app.rpc('fetchProviderModels',{providerId:'relay',refresh:true});assert.equal(entries.find(x=>x.id==='gpt-6.1-sol').codexContextWindow,600000);
+ checks.push('client metadata refresh changes the default; relay capacity cannot override reference or client facts');
  providerWindow=undefined;
  const thread='00000000-0000-0000-0000-000000000061';await mkdir(join(home,'sessions'),{recursive:true});
  const rollout=join(home,'sessions/thread.jsonl');

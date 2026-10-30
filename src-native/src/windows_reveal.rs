@@ -91,7 +91,10 @@ pub fn select_backup(path: &Path) -> Result<bool> {
             let _ = sender.send(result);
         });
     }
-    if receiver.recv_timeout(Duration::from_secs(30)).is_ok_and(|result| result.is_ok()) {
+    if receiver
+        .recv_timeout(Duration::from_secs(30))
+        .is_ok_and(|result| result.is_ok())
+    {
         return Ok(true);
     }
     open_folder(&folder)?;

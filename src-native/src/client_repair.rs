@@ -58,6 +58,18 @@ fn codex_owned(source: &str, managed: &str, official: bool) -> Result<String> {
             current.remove(key);
         }
     }
+    // Preserving official login routes a selected third-party model through
+    // the root URL, rather than a custom provider table. Repair that owned
+    // overlay too; ordinary custom providers keep unrelated root overrides.
+    if !official && expected.get("model_provider").and_then(Item::as_str) == Some("openai") {
+        for key in ["openai_base_url", "chatgpt_base_url"] {
+            if let Some(value) = expected.get(key) {
+                set_codex_field(&mut current, key, value.clone());
+            } else {
+                current.remove(key);
+            }
+        }
+    }
     if !official {
         for key in CODEX_PROVIDER_FIELDS {
             if let Some(value) = provider_field(&expected, "xwx_deck", key) {
@@ -195,6 +207,29 @@ mod tests {
         );
         let official = codex_owned(source, "openai_base_url='http://127.0.0.1:45233/v1'\nchatgpt_base_url='https://chatgpt.com/backend-api'", true).unwrap();
         assert_eq!(doc(&official).unwrap()["model"].as_str(), Some("external"));
+    }
+    #[test]
+    fn selected_official_provider_repairs_root_gateway_without_touching_foreign_groups() {
+        let source = "model='outside'\nmodel_provider='openai'\nopenai_base_url='https://outside.invalid'\n# keep\n[model_providers.other]\nbase_url='https://personal.invalid'\n";
+        let managed = "model='selected'\nmodel_provider='openai'\nopenai_base_url='http://127.0.0.1:45233/v1'\n";
+        let repaired = codex_owned(source, managed, false).unwrap();
+        let config = doc(&repaired).unwrap();
+        assert_eq!(
+            config["openai_base_url"].as_str(),
+            Some("http://127.0.0.1:45233/v1")
+        );
+        assert_eq!(config["model"].as_str(), Some("selected"));
+        assert_eq!(
+            config["model_providers"]["other"]["base_url"].as_str(),
+            Some("https://personal.invalid")
+        );
+        assert!(repaired.contains("# keep"));
+        let custom =
+            codex_owned(source, "model='selected'\nmodel_provider='custom'\n", false).unwrap();
+        assert_eq!(
+            doc(&custom).unwrap()["openai_base_url"].as_str(),
+            Some("https://outside.invalid")
+        );
     }
     #[test]
     fn preserve_unowned_claude_fields_and_reject_malformed_documents() {

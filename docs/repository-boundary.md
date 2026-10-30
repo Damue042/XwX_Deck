@@ -1,7 +1,7 @@
 # 仓库与隐私边界
 
 XwX Deck 使用 `app.xwxdeck.desktop` 应用身份。
-配置、凭据和必要缓存保存在 `xwx-deck` 目录。Windows 安装版的默认 Trace、日志和备份使用安装目录下的 `XwXTrace`，已有自定义目录保留。更新来自本仓库的 GitHub Releases。
+配置、凭据和必要缓存保存在 `xwx-deck` 目录。Windows 安装版的默认 Trace、日志和备份使用安装目录下的 `XwXTrace`，已有自定义目录保留。更新清单来自官网固定路径，安装包来自 Cloudflare R2。
 新安装的服务列表为空，遥测推送默认关闭。
 产品范围见 [产品定义](product.md)。
 

@@ -358,7 +358,7 @@ jobs:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node tools/release/write-release-manifest.mjs release-assets
+        run: node tools/release/write-release-manifest.mjs release-assets --unsigned-preview
 
       - name: Generate build provenance
         uses: actions/attest-build-provenance@v2

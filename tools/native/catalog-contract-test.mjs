@@ -37,6 +37,7 @@ const menu=()=>readFile(join(root,'codex/xwx-deck-model-catalog.json'),'utf8').t
 const pass=s=>{checks.push(s);console.log('PASS '+s);};
 try{
  await app.rpc('saveProvider',provider('one'));await app.rpc('switchClientProvider',{client:'codex',providerId:'one'});
+ await writeFile(join(root,'model-capabilities-cache.json'),JSON.stringify({version:1,modelsDev:[{modelId:'alias-native',canonicalModelId:'owner/alias-native',capability:{reasoning:true,levels:['high','low'],defaultLevel:'low'}},{modelId:'no-effort',canonicalModelId:'owner/no-effort',capability:{reasoning:true,levels:[]}}]}));
  let models=await fetchModels();const find=id=>models.find(r=>r.id===id);
  assert.deepEqual(find('alias-native').protocols,['anthropic-messages']);
  assert.deepEqual(find('alias-native').reasoningLevels,['high','low']);assert.equal(find('alias-native').defaultReasoningLevel,'low');

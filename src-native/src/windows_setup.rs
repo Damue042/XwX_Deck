@@ -589,12 +589,18 @@ pub fn worker() -> Option<i32> {
         let backup = target.with_extension(format!("exe.previous-{}", &previous_hash[..16]));
         // Preserve the executable before NSIS removes its temporary rollback files.
         // Never replace an existing recovery copy or automatically launch an old version.
-        let mut recovery = fs::OpenOptions::new().write(true).create_new(true).open(&backup).map_err(|e| format!("无法保留恢复备份：{e}"))?;
+        let mut recovery = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&backup)
+            .map_err(|e| format!("无法保留恢复备份：{e}"))?;
         let mut previous = fs::File::open(&target).map_err(|e| e.to_string())?;
         std::io::copy(&mut previous, &mut recovery).map_err(|e| e.to_string())?;
         recovery.sync_all().map_err(|e| e.to_string())?;
         drop(recovery);
-        if hash(&backup)? != previous_hash { return Err("恢复备份校验失败".into()); }
+        if hash(&backup)? != previous_hash {
+            return Err("恢复备份校验失败".into());
+        }
         let log = source.with_extension("install.log");
         let output = Command::new(&source)
             .arg("/S")
@@ -651,7 +657,11 @@ fn restart(target: &Path) -> Result<u32> {
         }
     }
     let helper = std::env::current_exe().map_err(|e| e.to_string())?;
-    crate::portable_update::launch_and_confirm(command, target, helper.parent().ok_or("无效更新目录")?)
+    crate::portable_update::launch_and_confirm(
+        command,
+        target,
+        helper.parent().ok_or("无效更新目录")?,
+    )
 }
 fn launch_root() -> Result<Option<(&'static str, PathBuf)>> {
     for flag in ["--pilot-root", "--data-root"] {

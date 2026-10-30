@@ -101,6 +101,11 @@ const cliEnv = {...process.env, HOME: isolatedHome, USERPROFILE: isolatedHome, A
   NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost', DISABLE_TELEMETRY: '1',
   DISABLE_ERROR_REPORTING: '1', CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', ANTHROPIC_API_KEY: token};
 for (const key of Object.keys(cliEnv)) if ((/^(CODEX_|OPENAI_)/.test(key) && key !== 'CODEX_HOME') || /^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|CLAUDE_CODE_USE_BEDROCK|CLAUDE_CODE_USE_VERTEX|CLAUDE_CODE_USE_FOUNDRY)$/.test(key)) delete cliEnv[key];
+async function writeNativeControls() {
+  // Runtime controls belong to the exact client record, never the relay's
+  // ordinary model-capability declarations.
+  await writeFile(join(root,'codex/models_cache.json'),JSON.stringify({models:[{slug:'fixture-model',context_window:32768,support_verbosity:declaredVerbosity,default_verbosity:'low',supports_search_tool:declaredSearch,base_instructions:'Synthetic installed-client fixture.'}]}));
+}
 async function runCli(binary, args, expectedCode = 0, input) {
   const cli = spawn(binary, args, {cwd: workspace, env: cliEnv, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe']});
   if (input !== undefined) cli.stdin.end(input);
@@ -126,7 +131,7 @@ function pass(label) { checks.push(label); console.log('PASS ' + label); }
 const codexArgs = ['exec', '--strict-config', '--ephemeral', '--skip-git-repo-check', '--ignore-rules', '-s', 'read-only', '--json', '--color', 'never', '-C', workspace, '-c', 'analytics.enabled=false', 'Return a short response. Do not call tools.'];
 const claudeArgs = ['--bare', '--no-session-persistence', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--tools', '', '--no-chrome', '--model', 'sonnet', '--output-format', 'json', '-p', 'Return a short response. Do not call tools.'];
 try {
-  start(); await rpc('getState'); await mkdir(workspace);
+  start(); await rpc('getState'); await rpc('updateCodexEnhancements',{preserveOfficialLogin:false}); await mkdir(workspace);
   await Promise.all([mkdir(isolatedRoaming, {recursive:true}), mkdir(isolatedLocal, {recursive:true})]);
   versions.codex = (await runCli(codex, ['--version'])).stdout.trim();
   versions.claude = (await runCli(claude, ['--version'])).stdout.trim();
@@ -138,17 +143,17 @@ try {
   await rpc('switchClientProvider', {client: 'claude', providerId: claudeId});
   await rpc('updateClaudeModels', {sonnet:'fixture-model', opus:'fixture-model', haiku:'fixture-model'});
   await writeFile(join(root, 'model-capabilities-cache.json'), JSON.stringify({version: 1, modelsDev: ['fixture-model', 'compatible-model'].map(modelId => ({modelId, providerId: 'fixture', sourceId: 'fixture/' + modelId, canonicalModelId: 'fixture/' + modelId, aliases: [modelId], referencePriority: 0, capability: {vision: true, toolCalling: true, reasoning: false, contextWindow: 32768, maxOutputTokens: 4096, inputModalities: ['text', 'image']}}))}));
-  await rpc('fetchProviderModels', {providerId: codexId, refresh: true});
+  await writeNativeControls(); await rpc('fetchProviderModels', {providerId: codexId, refresh: true});
   const directCodex = await runCli(codex, codexArgs);
   assert.ok(directCodex.stdout.includes(answer)); assert.equal(requests.at(-1).auth, 'Bearer ' + token);
   pass('installed Codex loads the generated strict config and catalog and completes a real local Responses SSE request');
   assert.equal(requests.at(-1).body.text.verbosity,'low');
-  declaredSearch=true;await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
+  declaredSearch=true;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   const searchArgs=[...codexArgs.slice(0,-1),'-c','web_search="live"',codexArgs.at(-1)];
   assert.ok((await runCli(codex,searchArgs)).stdout.includes(answer));assert.ok(requests.at(-1).body.tools.some(t=>t.type==='web_search'||t.type==='web_search_preview'));
-  declaredSearch=false;declaredVerbosity=false;await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
+  declaredSearch=false;declaredVerbosity=false;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   assert.ok((await runCli(codex,codexArgs)).stdout.includes(answer));assert.ok(!requests.at(-1).body.text?.verbosity);
-  declaredVerbosity=true;await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
+  declaredVerbosity=true;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   pass('installed Codex consumes declared verbosity and search in actual requests; an explicit capability disable removes verbosity after refresh');
 
   const image = join(workspace, 'fixture.png');

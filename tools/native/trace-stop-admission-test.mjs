@@ -43,7 +43,7 @@ async function request() {
 }
 try {
   const initial=await rpc('getState');assert.equal((await rpc('getState')).revision,initial.revision);
-  await clearFreshCompatibleFixture(rpc);
+  await clearFreshCompatibleFixture(rpc); await rpc('updateCodexEnhancements', {preserveOfficialLogin:false});
   await rpc('saveProvider',{displayName:'Fixture_5466a9e2',baseUrl,bearerToken:'synthetic-key',adapter:'responses',codexModel:'fixture'});
   const id=(await rpc('getProviders')).connections[0].id;
   await rpc('switchClientProvider',{client:'codex',providerId:id});

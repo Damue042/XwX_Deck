@@ -17,7 +17,7 @@ const targets = [
 ];
 const temporary = await mkdtemp(join(tmpdir(), 'deck-release-manifest-'));
 function generate(directory, tag = `v${version}`) {
-  return spawnSync(process.execPath, [join(root, 'tools/release/write-release-manifest.mjs'), directory], {
+  return spawnSync(process.execPath, [join(root, 'tools/release/write-release-manifest.mjs'), directory, '--unsigned-preview'], {
     cwd: temporary, encoding: 'utf8',
     env: { ...process.env, RELEASE_VERSION: version, RELEASE_TAG: tag, GITHUB_REPOSITORY: 'example/deck' }
   });
@@ -31,7 +31,7 @@ try {
   }
   const result = generate(temporary);
   assert.equal(result.status, 0, result.stderr);
-  const manifest = JSON.parse(await readFile(join(temporary, 'release.json'), 'utf8'));
+  const manifest = JSON.parse(await readFile(join(temporary, 'release-unsigned.json'), 'utf8'));
   assert.equal(manifest.version, version);
   assert.equal(manifest.tag, `v${version}`);
   assert.equal(manifest.channel, 'release');
@@ -43,7 +43,7 @@ try {
     const sha256 = createHash('sha256').update(data).digest('hex');
     const file = manifest.files.find(item => item.name === name);
     const kind = platform === 'windows' ? (name.endsWith('-setup.exe') ? 'installer' : 'portable') : 'disk-image';
-    assert.deepEqual(file, { platform, arch, kind, name, url: `https://github.com/example/deck/releases/download/v${version}/${name}`, size: data.length, sha256 });
+    assert.deepEqual(file, { platform, arch, kind, name, url: `https://download.xwxdeck.com/releases/v${version}/${name}`, size: data.length, sha256 });
     const checksum = `${sha256}  ${name}\n`;
     assert.equal(await readFile(join(temporary, `${name}.sha256`), 'utf8'), checksum);
     checksums.push(checksum);
@@ -64,7 +64,7 @@ try {
     const failure = generate(directory);
     assert.notEqual(failure.status, 0);
     assert.ok(failure.stderr.includes(`Missing release artifact: ${missing}`));
-    for (const name of ['release.json', 'latest.yml', 'checksums.txt']) await assert.rejects(access(join(directory, name)));
+    for (const name of ['release-unsigned.json', 'latest.yml', 'checksums.txt']) await assert.rejects(access(join(directory, name)));
   }
   console.log('PASS release manifest: three architectures, Setup/portable separation, immutable URLs, hashes, notes, unrelated cwd and missing-artifact rejection (synthetic payloads)');
 } finally { await rm(temporary, { recursive: true, force: true }); }

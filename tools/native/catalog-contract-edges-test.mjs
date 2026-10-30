@@ -24,14 +24,14 @@ const wss=new WebSocketServer({server});
 wss.on('connection',socket=>socket.on('message',raw=>{const body=JSON.parse(raw.toString());requests.push({transport:'WS',model:body.model,phase});socket.send(JSON.stringify({type:'response.created',response:{id:'edge-created'}}));release=()=>socket.send(JSON.stringify({type:phase==='incomplete'?'response.incomplete':'response.completed',response:response(body.model,phase)}));received?.();}));
 server.listen(0,'127.0.0.1');await once(server,'listening');
 let app=startNativeRpc(root),socket;
-const provider={id:'edge-provider',displayName:'Synthetic_edges',adapter:'responses',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,bearerToken:'SYNTHETIC-EDGE-KEY',codexModel:'contract-model'};
+const provider={id:'edge-provider',displayName:'Synthetic edges',adapter:'responses',baseUrl:`http://127.0.0.1:${server.address().port}/v1`,bearerToken:'SYNTHETIC-EDGE-KEY',codexModel:'contract-model'};
 const models=()=>app.rpc('fetchProviderModels',{providerId:provider.id,refresh:true});
 const pass=name=>{checks.push(name);console.log('PASS '+name);};
 async function wait(test,label){const deadline=Date.now()+5000;while(!await test()){if(Date.now()>deadline)throw Error('Timed out: '+label);await new Promise(r=>setTimeout(r,10));}}
 async function dashboard(count){let session;await wait(async()=>{const url=await app.rpc('getDashboardUrl');session=(await(await fetch(url+'api/state')).json()).sessions.find(s=>s.clientConversationKey.endsWith(':contract-edges'));return session?.traceCount===count;},'persisted WS traces');return session;}
 async function turn(beforeFinish){const accepted=new Promise(resolve=>received=resolve);const completed=new Promise(resolve=>{const onMessage=raw=>{const value=JSON.parse(raw.toString());if(['response.completed','response.incomplete'].includes(value.type)){socket.off('message',onMessage);resolve(value.response);}};socket.on('message',onMessage);});socket.send(JSON.stringify({type:'response.create',model:'contract-model',input:'synthetic arithmetic'}));await accepted;await beforeFinish?.();release();return completed;}
 try{
- await app.rpc('saveProvider',provider);await app.rpc('switchClientProvider',{client:'codex',providerId:provider.id});await models();
+ await app.rpc('saveProvider',provider);await app.rpc('switchClientProvider',{client:'codex',providerId:provider.id});await writeFile(join(root,'model-capabilities-cache.json'),JSON.stringify({version:1,modelsDev:rows().filter(row=>row.id!=='contract-model').map(row=>({modelId:row.id,canonicalModelId:'owner/'+row.id,capability:{reasoning:true,levels:row.supported_reasoning_levels.map(level=>level.effort),defaultLevel:row.default_reasoning_level}}))}));await models();
  const menu=JSON.parse(await readFile(join(root,'codex/xwx-deck-model-catalog.json'),'utf8')).models;
  for(const id of ['invalid-default','unadvertised-default','empty-default']){try{assert.equal(menu.find(m=>m.slug===id).default_reasoning_level,undefined,id);pass(id+' cannot publish an invalid or unadvertised Codex default effort');}catch(error){failures.push(error.message);}}
  assert.equal(menu.find(m=>m.slug==='valid-default').default_reasoning_level,'low');pass('a valid advertised default effort remains unchanged');
@@ -54,3 +54,4 @@ try{
 const report={passed:failures.length===0,checks,failures,requests,binarySha256:createHash('sha256').update(await readFile(nativeTestBinary)).digest('hex'),scope:'Actual native RPC/WS with synthetic provider, prices and credentials only; no real platform calls'};
 await writeFile(process.env.XWX_EDGE_REPORT??join(process.cwd(),'test-results/native-catalog-edges-summary.json'),JSON.stringify(report,null,2)+'\n');
 console.log(JSON.stringify(report));assert.deepEqual(failures,[]);
+

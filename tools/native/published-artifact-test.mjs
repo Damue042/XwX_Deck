@@ -4,32 +4,31 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { verifyEnvelope } from '../release/update-signature.mjs';
 
 const tag = process.env.RELEASE_TAG;
 assert.match(tag ?? '', /^v\d+\.\d+\.\d+$/);
-const repository = process.env.GITHUB_REPOSITORY ?? 'Damue042/XwX_Deck';
-assert.match(repository, /^[\w.-]+\/[\w.-]+$/);
 const root = await mkdtemp(join(tmpdir(), 'xwx-published-native-'));
-const base = `https://github.com/${repository}/releases/download/${tag}`;
+const base = `https://download.xwxdeck.com/releases/${tag}`;
 async function get(url) {
   const response = await fetch(url, { signal: AbortSignal.timeout(180000) });
   assert.equal(response.status, 200, `Anonymous download failed: ${url}`);
   return Buffer.from(await response.arrayBuffer());
 }
 const metadataBytes = await get(`${base}/release.json`);
-const metadata = JSON.parse(metadataBytes);
-const latest = JSON.parse(await get(`https://github.com/${repository}/releases/latest/download/release.json`));
+const trust = JSON.parse(await readFile(new URL('../../assets/update-trust.json', import.meta.url), 'utf8'));
+const metadata = verifyEnvelope(JSON.parse(metadataBytes), trust);
+const latest = verifyEnvelope(JSON.parse(await get('https://xwxdeck.com/updates/stable/release.json')), trust);
 assert.equal(metadata.version, tag.slice(1)); assert.equal(metadata.tag, tag); assert.equal(latest.tag, tag, 'Only the latest published release feeds production updates');
 const platform = process.platform === 'win32' ? 'windows' : 'darwin';
-const artifact = metadata.files.find(file => file.platform === platform && file.arch === process.arch);
+const artifact = metadata.files.find(file => file.platform === platform && file.arch === process.arch
+  && file.kind === (platform === 'windows' ? 'portable' : 'disk-image'));
 assert.ok(artifact, 'Missing matching native artifact');
 const requiredName = platform === 'windows' ? 'XwX-Deck-windows-x64.exe' : `XwX-Deck-mac-${process.arch}.dmg`;
 assert.equal(artifact.name, requiredName); assert.equal(artifact.url, `${base}/${requiredName}`);
 assert.match(artifact.sha256, /^[a-f0-9]{64}$/); assert.ok(artifact.size > 0 && artifact.size <= 512 * 1024 ** 2);
 const data = await get(artifact.url); assert.equal(data.length, artifact.size);
 assert.equal(createHash('sha256').update(data).digest('hex'), artifact.sha256);
-const sidecar = (await get(`${base}/${requiredName}.sha256`)).toString('utf8');
-assert.equal(sidecar.trim(), `${artifact.sha256}  ${requiredName}`);
 const downloaded = join(root, requiredName); await writeFile(downloaded, data);
 function command(file, args, env = process.env) {
   const result = spawnSync(file, args, { env, stdio: 'inherit' });

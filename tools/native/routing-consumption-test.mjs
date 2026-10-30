@@ -268,6 +268,7 @@ try {
     assert.deepEqual(calls.at(-1).body.tools, tools, 'native GPT image tools must reach the selected upstream');
     const denied = await fetch(state.localBaseUrl + '/v1/responses', { method: 'POST', headers: { 'content-type': 'application/json', 'x-codex-thread-id': 'same-thread' }, body: JSON.stringify({ model: 'launch-model', input: 'image denied upstream', tools }) });
     assert.equal(denied.status, 422); assert.match(await denied.text(), /upstream fixture image unavailable/);
+    await app.rpc('updateCodexEnhancements',{preserveOfficialLogin:false});
     await app.rpc('saveProvider', { id: 'route', displayName: 'Route fixture', adapter: 'auto', codexApiFormat: 'chat-completions', baseUrl: base, bearerToken: 'synthetic-route-key', codexModel: 'launch-model' });
     await post(app, state, 'client image namespace', undefined, 'launch-model', { tools: [tools[1]] });
     assert.equal(calls.at(-1).body.tools[0].function.name, 'image_gen__render', 'client image namespace survives conversion without provider filtering');

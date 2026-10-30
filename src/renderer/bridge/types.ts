@@ -328,6 +328,7 @@ export interface XwXDeckApi extends EditionApi {
   migrateWebCryptoKey?(): Promise<XwXDeckRuntimeState>;
   getTraceStats(): Promise<ManagerTraceStats>;
   getUpdateState(): Promise<XwXDeckUpdateState>;
+  confirmUpdateStartup?(): Promise<void>;
   checkForUpdates(): Promise<XwXDeckUpdateState>;
   downloadUpdate(): Promise<XwXDeckUpdateState>;
   restartAndInstall(): Promise<XwXDeckUpdateState>;

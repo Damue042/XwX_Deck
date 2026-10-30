@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "Ed25519",
+  "keys": [
+    {
+      "id": "release-ed25519-v1",
+      "publicKey": "fxeZFL2kmdFDVeYoSteiJH7Uv0W44IBe8BQB9p5wvu8="
+    }
+  ]
+}

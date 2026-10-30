@@ -138,9 +138,13 @@ impl Updates {
     }
     fn begin_check(&self, background: bool) -> Option<u64> {
         let mut inner = self.inner.lock().unwrap();
-        if inner.installing || inner.state["status"] == "downloading"
-            || (background && [Some("ready"), Some("checking")].contains(&inner.state["status"].as_str()))
-        { return None; }
+        if inner.installing
+            || inner.state["status"] == "downloading"
+            || (background
+                && [Some("ready"), Some("checking")].contains(&inner.state["status"].as_str()))
+        {
+            return None;
+        }
         inner.generation += 1;
         // A background read must not prevent an explicit download of an
         // already offered version. Its generation will then supersede this read.
@@ -149,11 +153,17 @@ impl Updates {
         }
         Some(inner.generation)
     }
-    pub async fn check(&self) -> Result<Value> { self.check_inner(false).await }
-    #[cfg(target_os = "windows")]
-    pub async fn check_background(&self) -> Result<Value> { self.check_inner(true).await }
+    pub async fn check(&self) -> Result<Value> {
+        self.check_inner(false).await
+    }
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    pub async fn check_background(&self) -> Result<Value> {
+        self.check_inner(true).await
+    }
     async fn check_inner(&self, background: bool) -> Result<Value> {
-        let Some(generation) = self.begin_check(background) else { return Ok(self.state()); };
+        let Some(generation) = self.begin_check(background) else {
+            return Ok(self.state());
+        };
         let fetched = self.manifest().await;
         let mut inner = self.inner.lock().unwrap();
         if inner.installing || inner.generation != generation {
@@ -288,7 +298,7 @@ impl Updates {
                 }
                 fs::create_dir_all(&directory).map_err(err)?;
                 let url = validate_url(text(&artifact, "url"))?;
-                let response = reqwest::Client::builder()
+                let response = source::client()?
                     .redirect(reqwest::redirect::Policy::limited(5))
                     .connect_timeout(Duration::from_secs(8))
                     .read_timeout(Duration::from_secs(30))
@@ -425,32 +435,40 @@ impl Updates {
 #[cfg(test)]
 mod update_check_tests {
     use super::*;
-    fn fixture() -> Updates { Updates::new(std::env::temp_dir().join(format!("update-check-fixture-{}", std::process::id()))) }
+    fn fixture() -> Updates {
+        Updates::new(
+            std::env::temp_dir().join(format!("update-check-fixture-{}", std::process::id())),
+        )
+    }
     #[test]
     fn background_check_keeps_ready_downloading_and_inflight_selection() {
         for status in ["ready", "downloading", "checking"] {
             let updates = fixture();
             let before = json!({"status":status,"targetVersion":"9.8.7","downloadPath":"keep-current-selection"});
-            { let mut inner=updates.inner.lock().unwrap();inner.state=before.clone();inner.generation=7; }
+            {
+                let mut inner = updates.inner.lock().unwrap();
+                inner.state = before.clone();
+                inner.generation = 7;
+            }
             assert!(updates.begin_check(true).is_none());
             assert_eq!(updates.state(), before);
-            assert_eq!(updates.inner.lock().unwrap().generation,7);
+            assert_eq!(updates.inner.lock().unwrap().generation, 7);
         }
     }
     #[test]
     fn background_check_leaves_available_version_downloadable() {
-        let updates=fixture();
-        updates.inner.lock().unwrap().state=json!({"status":"available","targetVersion":"9.8.7"});
+        let updates = fixture();
+        updates.inner.lock().unwrap().state = json!({"status":"available","targetVersion":"9.8.7"});
         assert!(updates.begin_check(true).is_some());
-        assert_eq!(updates.state()["status"],"available");
+        assert_eq!(updates.state()["status"], "available");
     }
     #[test]
     fn newer_explicit_check_supersedes_the_previous_generation() {
-        let updates=fixture();
-        let first=updates.begin_check(false).unwrap();
-        let second=updates.begin_check(false).unwrap();
-        assert!(second>first);
-        assert_ne!(updates.inner.lock().unwrap().generation,first);
-        assert_eq!(updates.inner.lock().unwrap().generation,second);
+        let updates = fixture();
+        let first = updates.begin_check(false).unwrap();
+        let second = updates.begin_check(false).unwrap();
+        assert!(second > first);
+        assert_ne!(updates.inner.lock().unwrap().generation, first);
+        assert_eq!(updates.inner.lock().unwrap().generation, second);
     }
 }

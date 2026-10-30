@@ -54,7 +54,7 @@ if (css.status !== 0) throw Error(`Renderer styles failed to build (${css.status
 const rendererCss = await readFile(resolve(root, 'dist/renderer/app.css'), 'utf8');
 await writeFile(resolve(output, 'app.css'), rendererCss.replaceAll('url(/fonts/', 'url(./fonts/'));
 await cp(resolve(root, 'web/site/index.html'), resolve(output, 'index.html'));
-for (const name of ['site.css', 'fonts.css', 'language.js', 'demo-tour.js']) await cp(resolve(root, 'web/site', name), resolve(output, name));
+for (const name of ['site.css', 'fonts.css', 'language.js', 'demo-tour.js', '_redirects', '_headers']) await cp(resolve(root, 'web/site', name), resolve(output, name));
 await cp(resolve(root, 'assets/fonts'), resolve(output, 'fonts'), { recursive: true });
 // The renderer emits content-addressed font files referenced by app.css.
 await cp(resolve(root, 'dist/renderer/fonts'), resolve(output, 'fonts'), { recursive: true });

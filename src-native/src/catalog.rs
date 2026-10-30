@@ -396,10 +396,11 @@ fn enrich_with_capabilities(mut entry: Value, remote: &Value, models: Value) -> 
     }
     let vision = entry["vision"] == true;
     let text_only = entry["vision"] == false;
-    if let Some(modalities) = entry.get_mut("inputModalities").and_then(Value::as_array_mut) {
-        if vision
-            && !modalities.iter().any(|v| v == "image")
-        {
+    if let Some(modalities) = entry
+        .get_mut("inputModalities")
+        .and_then(Value::as_array_mut)
+    {
+        if vision && !modalities.iter().any(|v| v == "image") {
             modalities.push(json!("image"));
         }
         if text_only {
@@ -617,7 +618,10 @@ impl Catalog {
             let cached: Value = serde_json::from_str(&source)
                 .map_err(|_| "模型缓存损坏，原文件已保留".to_string())?;
             if cached["connectionId"] == identity(p) && cached["adapter"] == p.adapter {
-                let entries = cached["entries"].as_array().cloned().ok_or("模型缓存目录格式无效")?;
+                let entries = cached["entries"]
+                    .as_array()
+                    .cloned()
+                    .ok_or("模型缓存目录格式无效")?;
                 let entries = self.client_defaults(p, enrich_models(entries, &remote));
                 return super::retired_models::overlay(&self.root, p, json!(entries));
             }
@@ -893,7 +897,11 @@ impl Pilot {
             current,
             entries.as_array().map(Vec::as_slice).unwrap_or(&[]),
         )?;
-        let vscode_selected = self.settings.other.get("clientRoutes").and_then(|routes| routes.get("vscode"))
+        let vscode_selected = self
+            .settings
+            .other
+            .get("clientRoutes")
+            .and_then(|routes| routes.get("vscode"))
             .is_some_and(|route| route["providerId"] == current.id);
         // Endpoint changes update generated direct configuration only while
         // Trace is inactive. Each writer preserves external edits and the
@@ -965,9 +973,7 @@ fn cached_entry(root: &Path, p: &Provider, model: &str) -> Option<Value> {
 
 pub(super) fn output_limit(root: &Path, p: &Provider, model: &str) -> Option<u64> {
     let entry = cached_entry(root, p, model)?;
-    if !["codex", "models.dev"]
-        .contains(&entry["capabilitySources"]["maxOutputTokens"].as_str()?)
-    {
+    if !["codex", "models.dev"].contains(&entry["capabilitySources"]["maxOutputTokens"].as_str()?) {
         return None;
     }
     entry["maxOutputTokens"].as_u64().filter(|limit| *limit > 0)
@@ -1595,16 +1601,19 @@ mod client_contract_tests {
         assert_eq!(resolved["maxInputTokens"], 922000);
         assert_eq!(resolved["maxOutputTokens"], 128000);
         assert_eq!(resolved["vision"], true);
-        assert_eq!(resolved["inputModalities"], json!(["text","image","pdf"]));
-        assert_eq!(resolved["reasoningLevels"], json!(["low","high","max"]));
+        assert_eq!(resolved["inputModalities"], json!(["text", "image", "pdf"]));
+        assert_eq!(resolved["reasoningLevels"], json!(["low", "high", "max"]));
         assert_eq!(resolved["temperature"], false);
         assert_eq!(resolved["capabilitySources"]["vision"], "models.dev");
         assert!(resolved.get("recommendedContextWindow").is_none());
         assert_eq!(resolved["providerCapabilities"], raw);
         assert_eq!(resolved["id"], "exact-model");
         assert_eq!(resolved["protocols"], json!(["openai-responses"]));
-        let empty = enrich_with_capabilities(entry.clone(), &Value::Null,
-            json!({"vision":false,"inputModalities":["text"],"reasoning":true,"levels":[],"toolCalling":false}));
+        let empty = enrich_with_capabilities(
+            entry.clone(),
+            &Value::Null,
+            json!({"vision":false,"inputModalities":["text"],"reasoning":true,"levels":[],"toolCalling":false}),
+        );
         assert_eq!(empty["vision"], false);
         assert_eq!(empty["toolCalling"], false);
         assert_eq!(empty["reasoningLevels"], json!([]));
@@ -1612,6 +1621,9 @@ mod client_contract_tests {
         assert!(unknown.get("vision").is_none());
         assert!(unknown.get("inputModalities").is_none());
         assert!(unknown.get("reasoningLevels").is_none());
-        assert!(unknown["missingCapabilities"].as_array().unwrap().contains(&json!("vision")));
+        assert!(unknown["missingCapabilities"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("vision")));
     }
 }

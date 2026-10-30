@@ -1,3 +1,7 @@
+#[allow(dead_code)]
+#[cfg(feature = "update-validation")]
+#[path = "../update_validation.rs"]
+mod update_validation;
 // Reuse the verified update worker without linking the desktop entrypoint or UI.
 #[cfg(target_os = "macos")]
 #[allow(dead_code)]

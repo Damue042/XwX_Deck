@@ -92,44 +92,6 @@ pub(super) fn request_model(
         .into()
 }
 
-#[cfg(test)]
-mod role_model_tests {
-    use super::*;
-
-    #[test]
-    fn concrete_role_targets_are_not_remapped_through_another_role() {
-        let root = std::env::temp_dir().join(format!("claude-role-{}", std::process::id()));
-        let provider = Provider {
-            claude_models: json!({
-                "fable":"claude-opus-5-5",
-                "opus":"gpt-6.1-sol",
-                "sonnet":"glm-5",
-                "haiku":"claude-haiku-5-5"
-            }),
-            ..Provider::default()
-        };
-        for model in [
-            "claude-opus-5-5",
-            "gpt-6.1-sol",
-            "glm-5",
-            "claude-haiku-5-5",
-        ] {
-            assert_eq!(request_model(&root, &provider, model, false), model);
-        }
-        assert_eq!(
-            request_model(&root, &provider, "claude-opus-5-5[1m]", false),
-            "claude-opus-5-5"
-        );
-        assert_eq!(
-            request_model(&root, &provider, "opus", false),
-            "gpt-6.1-sol"
-        );
-        assert_eq!(
-            request_model(&root, &provider, "fable", false),
-            "claude-opus-5-5"
-        );
-    }
-}
 impl Pilot {
     pub(super) fn refresh_desktop_selection(&mut self) -> Result<()> {
         let result = self.desktop_apply(self.gateway.as_ref().map(|g| g.port));
@@ -630,5 +592,44 @@ impl Pilot {
             return Err("Claude Desktop 恢复账本被外部修改，已保留".into());
         }
         fs::remove_file(path).map_err(err)
+    }
+}
+
+#[cfg(test)]
+mod role_model_tests {
+    use super::*;
+
+    #[test]
+    fn concrete_role_targets_are_not_remapped_through_another_role() {
+        let root = std::env::temp_dir().join(format!("claude-role-{}", std::process::id()));
+        let provider = Provider {
+            claude_models: json!({
+                "fable":"claude-opus-5-5",
+                "opus":"gpt-6.1-sol",
+                "sonnet":"glm-5",
+                "haiku":"claude-haiku-5-5"
+            }),
+            ..Provider::default()
+        };
+        for model in [
+            "claude-opus-5-5",
+            "gpt-6.1-sol",
+            "glm-5",
+            "claude-haiku-5-5",
+        ] {
+            assert_eq!(request_model(&root, &provider, model, false), model);
+        }
+        assert_eq!(
+            request_model(&root, &provider, "claude-opus-5-5[1m]", false),
+            "claude-opus-5-5"
+        );
+        assert_eq!(
+            request_model(&root, &provider, "opus", false),
+            "gpt-6.1-sol"
+        );
+        assert_eq!(
+            request_model(&root, &provider, "fable", false),
+            "claude-opus-5-5"
+        );
     }
 }

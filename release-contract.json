@@ -28,8 +28,8 @@
   },
   "updates": {
     "enabledByDefault": true,
-    "provider": "github-releases",
-    "defaultServer": "https://github.com/Damue042/XwX_Deck/releases/latest/download",
+    "provider": "cloudflare-r2",
+    "defaultServer": "https://xwxdeck.com/updates/stable",
     "serverEnvironmentVariable": "XWX_DECK_UPDATE_SERVER_URL",
     "metadataEnvironmentVariable": "XWX_DECK_METADATA_PUSH_URL",
     "startupCheckDelayMs": 6000,
@@ -42,6 +42,12 @@
       "idleThresholdSeconds": 900,
       "cancelledVersionPersists": true,
       "requiresSafeShutdown": true
+    },
+    "artifactBase": "https://download.xwxdeck.com/releases",
+    "signature": {
+      "algorithm": "Ed25519",
+      "trustFile": "assets/update-trust.json",
+      "required": true
     }
   },
   "platforms": {

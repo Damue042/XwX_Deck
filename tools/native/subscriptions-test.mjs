@@ -68,7 +68,7 @@ const signin=async()=>{const flow=await begin();await fetch(flow.callback);retur
 const pass=name=>console.log('PASS '+name);
 start();
 try{
- await clearFreshCompatibleFixture(rpc); assert.deepEqual((await rpc('getSubscriptionAccounts')).accounts,[]);assert.deepEqual((await rpc('getProviders')).connections,[]);pass('saved empty registry has no subscription accounts or connection');
+ await clearFreshCompatibleFixture(rpc); await rpc('updateCodexEnhancements', {preserveOfficialLogin:false}); assert.deepEqual((await rpc('getSubscriptionAccounts')).accounts,[]);assert.deepEqual((await rpc('getProviders')).connections,[]);pass('saved empty registry has no subscription accounts or connection');
  mode='valid';const first=await begin();const bad=new URL(first.callback);bad.searchParams.set('state','wrong-state');assert.equal((await fetch(bad)).status,400);assert.equal((await rpc('getSubscriptionAccounts')).flow.status,'waiting');assert.equal((await fetch(first.callback)).status,200);assert.equal((await fetch(first.callback).catch(()=>({status:400}))).status,400);
  let accounts=(await rpc('getSubscriptionAccounts')).accounts;assert.equal(accounts.length,1);const a=accounts[0];await rpc('connectSubscriptionAccount',a.id);pass('PKCE callback, verified JWT, one-time state and account registration');
  for(mode of ['wrong-signature','wrong-audience','wrong-nonce','expired','identity-only']){const s=await signin();assert.equal(s.flow.status,'failed',mode);assert.equal(s.accounts.length,1,mode);}pass('reject forged, wrong-app, wrong-nonce, expired and identity-only authorization');

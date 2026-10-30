@@ -54,7 +54,7 @@ const stop=async()=>{const ended=once(child,'exit');child.stdin.end();assert.equ
 const setFixtureExpiry=async(id,expires=0)=>{const path=join(root,'subscription-accounts.json'),vault=JSON.parse(await readFile(path,'utf8')),account=vault.accounts.find(account=>account.id==='native-'+id);assert.ok(account);account.expires=expires;await writeFile(path,JSON.stringify(vault));};
 let installedClient=false;
 try{
- start();for(const a of accounts)await rpc('connectSubscriptionAccount',a.id);
+ start();await rpc('updateCodexEnhancements',{preserveOfficialLogin:false});for(const a of accounts)await rpc('connectSubscriptionAccount',a.id);
  const providers=await rpc('getProviders');assert.ok(providers.connections.every(p=>p.codexNativeAuth));
  const a=providers.connections.find(p=>p.subscriptionAccountId==='native-a'),b=providers.connections.find(p=>p.subscriptionAccountId==='native-b');
  await rpc('switchClientProvider',{client:'codex',providerId:a.id});await rpc('updateCodexConfig',{expectedProviderId:a.id,compatibleModel:'native-response-model'});

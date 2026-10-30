@@ -1,4 +1,5 @@
 export const english: Readonly<Record<string,string>> = {
+  '无法确认更新启动': 'Unable to confirm update startup',
   '同时删除已有 Trace 详细记录': 'Also delete existing detailed Trace records',
   '删除后无法恢复，Token 和费用统计保留': 'Deletion cannot be undone. Token usage and cost statistics are kept.',
   '删除并应用': 'Delete and apply',

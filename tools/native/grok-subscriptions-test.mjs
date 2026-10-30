@@ -63,7 +63,7 @@ try {
  const second=await complete();assert.equal(second.flow.status,'complete',JSON.stringify(second.flow));assert.equal(second.accounts.length,2);const b=second.accounts.find(x=>x.id!==a.id);assert.notEqual(a.id,b.id);
  if(secure){for(const account of [a,b]){const source=await readFile(join(root,'grok-accounts',account.id,'auth.json'),'utf8');assert.equal(JSON.parse(source).nativeEncryptedDocument,1);assert.ok(!source.includes('grok-secret'));}pass('official CLI credentials are sealed before account publication');}
  pass('official CLI device flow uses separate owned homes for multiple Grok accounts');
- await clearFreshCompatibleFixture(rpc); const pa=(await rpc('connectSubscriptionAccount',a.id)).connections[0], pb=(await rpc('connectSubscriptionAccount',b.id)).connections[1];
+ await clearFreshCompatibleFixture(rpc); await rpc('updateCodexEnhancements', {preserveOfficialLogin:false}); const pa=(await rpc('connectSubscriptionAccount',a.id)).connections[0], pb=(await rpc('connectSubscriptionAccount',b.id)).connections[1];
  await rpc('switchClientProvider',{client:'codex',providerId:pa.id}); await rpc('updateCodexConfig',{expectedProviderId:pa.id,compatibleModel:'grok-fixture'});
  await rpc('switchClientProvider',{client:'claude',providerId:pb.id});await rpc('updateClaudeModels',{fable:'grok-fixture',opus:'grok-fixture',sonnet:'grok-fixture',haiku:'grok-fixture'});
  const choices=(await rpc('getProviders')).selected;await rpc('renameSubscriptionAccount',{accountId:a.id,label:'Grok 工作'});assert.deepEqual((await rpc('getProviders')).selected,choices);

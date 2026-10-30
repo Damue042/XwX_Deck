@@ -23,6 +23,9 @@ const isolated = process.argv.includes('--pilot');
 const acceptance = process.argv.includes('--acceptance');
 const skipTests = process.argv.includes('--skip-tests');
 const signed = process.argv.includes('--signed');
+const updateValidation = process.argv.includes('--update-validation');
+if(updateValidation && !(isolated && signed && process.platform==='darwin'))throw Error('Update validation requires --pilot --signed on macOS');
+const automaticMacUpdate = editionBuild.automaticMacUpdate || updateValidation;
 if (signed && process.platform !== 'darwin') throw Error('--signed requires macOS.');
 if (isolated && acceptance) throw Error('隔离验证和正常安装验收是不同的构建模式，不能同时启用。');
 const readiness=JSON.parse(await readFile(resolve(pilot,'../../src-native/migration-status.json'),'utf8'));
@@ -42,7 +45,8 @@ const scope = isolated ? 'Isolated validation candidate; production gate remains
   ? 'User-requested installable manual acceptance candidate; normal application identity and data; real-environment acceptance remains pending.'
   : 'Native release candidate after migration acceptance.';
 const packageJson=JSON.parse(await readFile(resolve(root,'package.json'),'utf8'));
-const version=packageJson.version;
+const version=updateValidation?process.argv.find(a=>a.startsWith('--validation-version='))?.slice(21):packageJson.version;
+if(!version || !/^\d+\.\d+\.\d+$/.test(version))throw Error('Explicit validation version required');
 const { cargo, env } = rustToolchain(root);
 env.XWX_NATIVE_PILOT = isolated ? '1' : '0';
 // rustToolchain supplies the default; keep an explicit isolated build cache.
@@ -71,8 +75,8 @@ const editMenuSource=await readFile(resolve(root,'src/shared/edit-context-menu.b
 await writeFile(resolve(root,'test-results/native-frontend/licenses.html'),renderLicenseDocument(notices,licenseTexts).replace('</body>','<script>'+editMenuSource+'</script></body>'));
 const embeddedFrontendSha256 = await directoryFingerprint(resolve(root, 'test-results/native-frontend'));
 const embeddedAssetsSha256 = await directoryFingerprint(resolve(root, 'test-results/native-assets'));
-run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.nativeBinary, ...(acceptance ? ['--features', 'manual-acceptance'] : []), '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
-if (signed && editionBuild.automaticMacUpdate) run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.helperBinary, ...(acceptance ? ['--features', 'manual-acceptance'] : []), '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
+run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.nativeBinary, ...(updateValidation ? ['--features','update-validation'] : acceptance ? ['--features', 'manual-acceptance'] : []), '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
+if (signed && automaticMacUpdate) run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.helperBinary, ...(updateValidation ? ['--features','update-validation'] : acceptance ? ['--features', 'manual-acceptance'] : []), '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
 await assertEditionArtifact(resolve(env.CARGO_TARGET_DIR,'release',editionBuild.nativeBinary+(process.platform==='win32'?'.exe':'')),root);
 if (embeddedFrontendSha256 !== await directoryFingerprint(resolve(root, 'test-results/native-frontend')) || embeddedAssetsSha256 !== await directoryFingerprint(resolve(root, 'test-results/native-assets'))) throw Error('原生编译期间嵌入资源发生变化，未登记候选；请重新构建。');
 if (process.platform !== 'darwin') {
@@ -140,7 +144,7 @@ let apple = null, notarization = null;
 if (signed) {
   apple = await appleReleaseConfig(root);
   // Sign outside the bundle so the detached updater has no external Info.plist seal.
-  if(editionBuild.automaticMacUpdate){
+  if(automaticMacUpdate){
   const helperDirectory = await mkdtemp(join(await realpath(tmpdir()), 'xwx-update-helper-signing-'));
   try {
     const helper = join(helperDirectory, 'update-helper');
@@ -205,14 +209,14 @@ if (initialSource.sha256 !== finalSource.sha256 || initialGit.stdout.trim() !== 
 const measurements={version,branch:branch.output,commit:git.output,worktree:worktree.output,dirty:Boolean(worktree.output),buildTime:new Date().toISOString(),
   sourceFingerprint:finalSource.sha256,sourceFileCount:finalSource.fileCount,
   embeddedFrontendSha256,embeddedAssetsSha256,
-  candidate:{app,dmg,binary,appSha256,appManifest,binaryBytes:await size(binary),appBytes:await size(app),dmgBytes:await size(dmg),...(signed && editionBuild.automaticMacUpdate ? {helperBytes:await size(resolve(app,'Contents/Helpers/update-helper'))}:{}),binarySha256:await sha256(binary),dmgSha256:await sha256(dmg),
+  candidate:{app,dmg,binary,appSha256,appManifest,binaryBytes:await size(binary),appBytes:await size(app),dmgBytes:await size(dmg),...(signed && automaticMacUpdate ? {helperBytes:await size(resolve(app,'Contents/Helpers/update-helper'))}:{}),binarySha256:await sha256(binary),dmgSha256:await sha256(dmg),
     architecture:inspect('/usr/bin/lipo',['-archs',binary]).output,bundleId:appId,
     containsNode:files.some(path=>/\/(node|node.exe|libnode[^/]*)$/i.test(path)),containsChromium:files.some(path=>/Electron Framework|Chromium|\.asar$|\.pak$/i.test(path)),
     linkedLibraries:inspect('/usr/bin/otool',['-L',binary]).output,
     signature:inspect('/usr/bin/codesign',['-dv','--verbose=4',app]).output,signatureVerified:inspect('/usr/bin/codesign',['--verify','--deep','--strict',app]).code===0},
   baseline,buildMode,scope,
-  productionReady:readiness.productionReady,compression,dmgLayout,signed:signed?'developer-id':'adhoc',notarized:Boolean(notarization),notarization,
-  automaticUpdate:signed && editionBuild.automaticMacUpdate?{format:'signed-notarized-dmg',teamId:apple.teamId,replacement:'atomic-bundle-swap'}:null,installed:false,published:false
+  validationOnly:updateValidation,productionReady:readiness.productionReady,compression,dmgLayout,signed:signed?'developer-id':'adhoc',notarized:Boolean(notarization),notarization,
+  automaticUpdate:signed && automaticMacUpdate?{format:'signed-notarized-dmg',teamId:apple.teamId,replacement:'atomic-bundle-swap'}:null,installed:false,published:false
 };
 measurements.sizeBudget = checkNativeArtifactSize(measurements.candidate);
 if(measurements.candidate.containsNode||measurements.candidate.containsChromium)throw Error('原生交付包含禁止的运行时');

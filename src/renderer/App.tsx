@@ -25,11 +25,6 @@ function Shell(): React.ReactElement {
   useLanguage();
   const bridge = useBridge();
   React.useLayoutEffect(() => { if (bridge.runtime) restoreLanguage(bridge.runtime.language ?? undefined); }, [bridge.runtime?.language, bridge.booted]);
-  React.useEffect(() => {
-    if (!bridge.booted || !bridge.runtime) return;
-    const frame = requestAnimationFrame(() => window.dispatchEvent(new Event('xwxdeck:startup-ready')));
-    return () => cancelAnimationFrame(frame);
-  }, [bridge.booted, Boolean(bridge.runtime)]);
   const [activePage, setActivePage] = React.useState<PageId>('signal');
   const [windowState, setWindowState] = React.useState({ maximized: false, fullscreen: false, nativeFrame: document.documentElement.dataset.platform === 'darwin' });
   const latestRuntime = React.useRef(bridge.runtime);

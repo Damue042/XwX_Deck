@@ -5,7 +5,7 @@ pub(crate) const IMAGE_JOURNAL: &str = "compatible-image-gen.json";
 pub(crate) const DESKTOP_LEGACY_IDS: [&str; 2] = ["xwx-deck", "xwx-deck-deepseek"];
 pub(crate) const PROVIDER_CLIENTS: &[&str] = &["codex", "claude"];
 #[cfg(target_os = "macos")]
-pub(crate) const AUTOMATIC_MACOS_UPDATES: bool = false;
+pub(crate) const AUTOMATIC_MACOS_UPDATES: bool = cfg!(feature = "update-validation");
 pub(crate) const THEME_KEY: &str = "xwx-deck.theme";
 pub(crate) const LANGUAGE_KEY: &str = "xwx-deck.language";
 pub(crate) const SIDEBAR_KEY: &str = "xwx-deck.sidebar";
@@ -21,10 +21,15 @@ pub(crate) fn extra_preference_value(_key: &str, _value: Option<&str>) -> bool {
 }
 
 pub(crate) fn allow_update_url(url: &reqwest::Url) -> bool {
-    url.scheme() == "https"
-        || (std::env::args().any(|a| a == "--rpc" || a == "--smoke")
-            && url.scheme() == "http"
-            && [Some("127.0.0.1"), Some("localhost")].contains(&url.host_str()))
+    #[cfg(feature = "update-validation")]
+    return crate::update_validation::allowed_url(url);
+    #[cfg(not(feature = "update-validation"))]
+    {
+        url.scheme() == "https"
+            || (std::env::args().any(|a| a == "--rpc" || a == "--smoke")
+                && url.scheme() == "http"
+                && [Some("127.0.0.1"), Some("localhost")].contains(&url.host_str()))
+    }
 }
 
 pub(crate) fn foreign_model_alias(value: &str) -> bool {

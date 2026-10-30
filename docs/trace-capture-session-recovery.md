@@ -5,7 +5,7 @@
 
 > 核对日期：2026-08-13
 >
-> 适用范围：XwX Deck 1.1.1 当前工作区
+> 适用范围：XwX Deck 原生工作区
 
 本文说明 Trace 实际记录了什么、请求如何归入 Session、为什么会出现看似重复的消息，以及仪表盘应该怎样展示内部请求。Compaction、Codex 本地 rollout、明文检查点和官方/兼容服务 双向转换的权威说明见[Codex 上下文压缩、Rollout 与跨上游可移植性](codex-context-compaction-portability.md)。
 

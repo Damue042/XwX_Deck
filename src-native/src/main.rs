@@ -12,6 +12,8 @@ mod language;
 mod macos_update;
 mod portable_update;
 mod renderer_preferences;
+#[cfg(feature = "update-validation")]
+mod update_validation;
 #[cfg(target_os = "macos")]
 mod webcrypto_store;
 mod webview_cache;
@@ -55,6 +57,8 @@ async fn install_macos_update(
         tauri::async_runtime::spawn_blocking(move || macos_update::prepare(&path, &version, &root))
             .await
             .map_err(|e| e.to_string())??;
+    #[cfg(feature = "update-validation")]
+    update_validation::after_stage(&pilot.lock().await.root)?;
     let mut state = pilot.lock().await;
     // User input, opt-out or a newly started Trace during staging defers unattended installation.
     if unattended
@@ -63,11 +67,8 @@ async fn install_macos_update(
         macos_update::discard(job);
         return Err("自动更新已延后，当前应用继续可用".into());
     }
-    if let Err(error) = state.stop().await {
-        macos_update::discard(job);
-        return Err(error);
-    }
-    // Recheck control after staging and safe shutdown, before handing off.
+    // The shared install command revalidates the selected artifact and uses
+    // graceful admission. Never force-stop a request started during staging.
     if let Err(error) = state.call("restartAndInstall", &[]).await {
         macos_update::discard(job);
         return Err(error);
@@ -97,68 +98,139 @@ fn spawn_windows_update(path: &std::path::Path, state: &Value) -> Result<(), Str
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos"))]
 #[derive(Default)]
-struct WindowsUpdateSchedule { last_check_ms: Option<u64> }
+struct UpdateSchedule {
+    last_check_ms: Option<u64>,
+}
 
-#[cfg(target_os = "windows")]
-impl WindowsUpdateSchedule {
-    async fn tick(&mut self, shared: &Shared, elapsed_ms: u64, night_idle: bool) -> Option<Value> {
-        let due = self.last_check_ms.map_or(elapsed_ms >= 6000, |last| elapsed_ms.saturating_sub(last) >= 1_800_000);
-        let state = shared.lock().await.update_state();
-        if due && !["downloading", "ready", "checking"].contains(&state["status"].as_str().unwrap_or("")) {
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+impl UpdateSchedule {
+    fn should_check(&self, elapsed_ms: u64, status: &str) -> bool {
+        let due = self.last_check_ms.map_or(elapsed_ms >= 6000, |last| {
+            elapsed_ms.saturating_sub(last) >= 1_800_000
+        });
+        due && !["downloading", "ready", "checking"].contains(&status)
+    }
+    async fn refresh(&mut self, shared: &Shared, elapsed_ms: u64) {
+        let updates = shared.lock().await.updates_context();
+        if self.should_check(elapsed_ms, updates.state()["status"].as_str().unwrap_or("")) {
             self.last_check_ms = Some(elapsed_ms);
-            let updates = shared.lock().await.updates_context();
             let _ = updates.check_background().await;
         }
-        if !night_idle { return None; }
+    }
+    #[cfg(target_os = "windows")]
+    async fn tick(&mut self, shared: &Shared, elapsed_ms: u64, night_idle: bool) -> Option<Value> {
+        self.refresh(shared, elapsed_ms).await;
+        if !night_idle {
+            return None;
+        }
         let mut pilot = shared.lock().await;
-        if pilot.active() || !pilot.nightly_eligible() { return None; }
+        if pilot.active() || !pilot.nightly_eligible() {
+            return None;
+        }
         let state = pilot.update_state();
-        if state["status"] == "available" { let _ = pilot.call("downloadAutomaticUpdate", &[]).await; }
-        if state["status"] == "ready" { return pilot.call("restartAndInstall", &[]).await.ok(); }
+        if state["status"] == "available" {
+            let _ = pilot.call("downloadAutomaticUpdate", &[]).await;
+        }
+        if state["status"] == "ready" {
+            return pilot.call("restartAndInstall", &[]).await.ok();
+        }
         None
+    }
+}
+
+#[cfg(all(test, any(target_os = "windows", target_os = "macos")))]
+mod update_schedule_tests {
+    use super::UpdateSchedule;
+    #[test]
+    fn periodic_checks_preserve_pending_work_and_recover_terminal_states() {
+        let mut schedule = UpdateSchedule::default();
+        assert!(!schedule.should_check(5999, "idle"));
+        assert!(schedule.should_check(6000, "idle"));
+        schedule.last_check_ms = Some(6000);
+        for status in ["up-to-date", "error", "available"] {
+            assert!(!schedule.should_check(1_805_999, status));
+            assert!(schedule.should_check(1_806_000, status));
+        }
+        for status in ["downloading", "ready", "checking"] {
+            assert!(!schedule.should_check(1_806_000, status));
+        }
+        assert!(!schedule.should_check(5999, "error"));
     }
 }
 
 #[cfg(target_os = "windows")]
 fn isolated_update_clock(root: &std::path::Path) -> Option<PathBuf> {
-    if !std::env::args().any(|a| a == "--rpc") { return None; }
+    if !std::env::args().any(|a| a == "--rpc") {
+        return None;
+    }
     let requested = std::fs::canonicalize(argument("--test-nightly-clock")?).ok()?;
     let expected = std::fs::canonicalize(root.join("update-test-clock.json")).ok()?;
-    if requested != expected || std::fs::read_to_string(root.join(".xwx-rust-pilot")).ok()?.as_str() != "isolated-rust-pilot-v1\n" { return None; }
+    if requested != expected
+        || std::fs::read_to_string(root.join(".xwx-rust-pilot"))
+            .ok()?
+            .as_str()
+            != "isolated-rust-pilot-v1\n"
+    {
+        return None;
+    }
     Some(requested)
 }
 
 #[cfg(target_os = "windows")]
 async fn run_isolated_update_clock(shared: Shared, clock: PathBuf, root: PathBuf) {
     use std::io::Write;
-    let mut schedule = WindowsUpdateSchedule::default();
+    let mut schedule = UpdateSchedule::default();
     let mut prior = Value::Null;
     let mut previous_ms = 0;
     loop {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         let valid = (|| -> Option<Value> {
             let info = std::fs::symlink_metadata(&clock).ok()?;
-            if !info.is_file() || info.file_type().is_symlink() || info.len() > 1024 { return None; }
+            if !info.is_file() || info.file_type().is_symlink() || info.len() > 1024 {
+                return None;
+            }
             serde_json::from_slice(&std::fs::read(&clock).ok()?).ok()
         })();
-        let Some(value) = valid else { continue; };
-        let (Some(elapsed), Some(hour), Some(idle)) = (value["elapsedMs"].as_u64(), value["hour"].as_u64(), value["idleMs"].as_u64()) else { continue; };
-        if elapsed < previous_ms || hour >= 24 { continue; }
+        let Some(value) = valid else {
+            continue;
+        };
+        let (Some(elapsed), Some(hour), Some(idle)) = (
+            value["elapsedMs"].as_u64(),
+            value["hour"].as_u64(),
+            value["idleMs"].as_u64(),
+        ) else {
+            continue;
+        };
+        if elapsed < previous_ms || hour >= 24 {
+            continue;
+        }
         previous_ms = elapsed;
-        let plan = schedule.tick(&shared, elapsed, portable_update::nightly_window(hour as u32, idle)).await;
+        let plan = schedule
+            .tick(
+                &shared,
+                elapsed,
+                portable_update::nightly_window(hour as u32, idle),
+            )
+            .await;
         let state = shared.lock().await.update_state();
         if state != prior || plan.is_some() {
             let event = json!({"clock":value,"state":state,"handoff":plan});
-            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(root.join("nightly-test-events.jsonl")) {
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(root.join("nightly-test-events.jsonl"))
+            {
                 let _ = writeln!(file, "{event}");
             }
             prior = state;
         }
         // The production host exits at handoff. The isolated RPC process stays
         // available for assertions and never runs an installer or replaces an EXE.
-        if plan.is_some() { return; }
+        if plan.is_some() {
+            return;
+        }
     }
 }
 
@@ -300,9 +372,56 @@ async fn pilot_rpc(
         return result;
     }
     match method.as_str() {
-        #[cfg(target_os = "windows")]
+        #[cfg(feature = "update-validation")]
+        "updateValidationNightClock" => {
+            update_validation::set_night_clock(
+                &pilot.lock().await.root,
+                args.first().ok_or("missing test clock")?,
+            )?;
+            Ok(Value::Null)
+        }
+        #[cfg(feature = "update-validation")]
+        "updateValidationNightProbe" => {
+            let p = pilot.lock().await;
+            Ok(
+                json!({"pollCount":update_validation::poll_count(&p.root),"active":p.active(),"eligible":p.nightly_eligible(),"update":p.update_state(),"scenario":update_validation::scenario(&p.root)?}),
+            )
+        }
+        #[cfg(feature = "update-validation")]
+        "updateValidationHistory" => pilot
+            .lock()
+            .await
+            .update_validation_history(args.first().and_then(Value::as_bool).unwrap_or(false)),
+        #[cfg(feature = "update-validation")]
+        "updateValidationCheckpoint" => {
+            update_validation::checkpoint(
+                &pilot.lock().await.root,
+                args.first().unwrap_or(&Value::Null),
+            )?;
+            Ok(Value::Null)
+        }
+        #[cfg(feature = "update-validation")]
+        "updateValidationControl" => {
+            update_validation::control(
+                &pilot.lock().await.root,
+                args.first()
+                    .and_then(Value::as_str)
+                    .ok_or("missing validation mode")?,
+            )?;
+            Ok(Value::Null)
+        }
         "confirmUpdateStartup" => {
+            #[cfg(target_os = "windows")]
             portable_update::acknowledge_startup()?;
+            #[cfg(feature = "update-validation")]
+            if update_validation::withhold_health(&pilot.lock().await.root) {
+                return Err("Injected isolated health timeout".into());
+            }
+            #[cfg(target_os = "macos")]
+            tokio::task::spawn_blocking(macos_update::notify_ready)
+                .await
+                .map_err(|e| e.to_string())??;
+
             Ok(Value::Null)
         }
         "inspectStorageMigration" => pilot.lock().await.inspect_storage_migration(),
@@ -911,7 +1030,10 @@ async fn pilot_rpc(
                     let selected = app.opener().reveal_item_in_dir(&path).is_ok();
                     if !selected {
                         app.opener()
-                            .open_path(path.parent().ok_or("备份目录无效")?.to_string_lossy(), None::<&str>)
+                            .open_path(
+                                path.parent().ok_or("备份目录无效")?.to_string_lossy(),
+                                None::<&str>,
+                            )
                             .map_err(|e| e.to_string())?;
                     }
                     selected
@@ -1278,7 +1400,9 @@ async fn pilot_smoke_report(
         if let Some(directory) = std::env::var_os("XWX_DECK_UPDATE_READY_DIR") {
             // Keep the test application alive until its real worker observes readiness.
             for _ in 0..100 {
-                if PathBuf::from(&directory).join("confirmed.json").is_file() { break; }
+                if PathBuf::from(&directory).join("confirmed.json").is_file() {
+                    break;
+                }
                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
             }
         }
@@ -1493,6 +1617,22 @@ fn show_startup_recovery(message: &str) {
 }
 
 fn main() {
+    #[cfg(feature = "update-validation")]
+    if let Err(error) = update_validation::guard_launch() {
+        eprintln!("{error}");
+        std::process::exit(2);
+    }
+    // A replacement launch must be admitted by the exact signed helper before
+    // opening configuration, credentials, Trace or other user data.
+    #[cfg(target_os = "macos")]
+    if let Err(error) = macos_update::notify_starting() {
+        eprintln!("更新启动未获确认，尚未打开用户数据：{error}");
+        std::process::exit(2);
+    }
+    #[cfg(feature = "update-validation")]
+    if let Some(root) = argument("--pilot-root") {
+        update_validation::inject_startup_failure(std::path::Path::new(&root));
+    }
     let startup_clock = std::time::Instant::now();
     if let Some(path) = argument("--application-reset-worker") {
         match core::reset_worker(std::path::Path::new(&path)) {
@@ -1779,7 +1919,11 @@ fn main() {
     if rpc_mode {
         #[cfg(target_os = "windows")]
         if let Some(clock) = isolated_update_clock(&root) {
-            tauri::async_runtime::spawn(run_isolated_update_clock(pilot.clone(), clock, root.clone()));
+            tauri::async_runtime::spawn(run_isolated_update_clock(
+                pilot.clone(),
+                clock,
+                root.clone(),
+            ));
         }
         let metadata =
             tauri::async_runtime::block_on(async { pilot.lock().await.metadata_context() });
@@ -1979,7 +2123,10 @@ fn main() {
                 _=>{}
             }}).build(app)?;
             sync_trace_tray(app.handle(), &tauri::async_runtime::block_on(async { app.state::<Shared>().lock().await.state() }), false);
-            if !std::env::args().any(|a|a=="--pilot-root"){
+            if !std::env::args().any(|a|a=="--pilot-root") || {
+                #[cfg(feature="update-validation")] { update_validation::nightly_mode() }
+                #[cfg(not(feature="update-validation"))] { false }
+            }{
                 let shared=app.state::<Shared>().inner().clone();let handle=app.handle().clone();
                 tauri::async_runtime::spawn(async move{
                     let resumed={shared.lock().await.call("resumeTracing",&[]).await};
@@ -1987,16 +2134,25 @@ fn main() {
                         Ok(state)=>{let _=handle.emit("pilot-state",state);},
                         Err(error)=>{let mut state=shared.lock().await.state();state["lastError"]=json!(error);let _=handle.emit("pilot-state",state);}
                     }
-                    #[cfg(not(target_os="windows"))] {
+                    #[cfg(not(any(target_os="windows",target_os="macos")))] {
                         tokio::time::sleep(std::time::Duration::from_millis(6000)).await;
                         let updates=shared.lock().await.updates_context();if updates.state()["status"]=="idle"{if let Ok(state)=updates.check().await{let _=handle.emit("pilot-update",state);}}
                     }
-                    #[cfg(target_os="windows")] let update_clock = std::time::Instant::now();
-                    #[cfg(target_os="windows")] let mut update_schedule = WindowsUpdateSchedule::default();
+                    #[cfg(any(target_os="windows",target_os="macos"))] let update_clock = std::time::Instant::now();
+                    #[cfg(any(target_os="windows",target_os="macos"))] let mut update_schedule = UpdateSchedule::default();
                     let mut previous_update=Value::Null;
                     loop{
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                        let state=shared.lock().await.update_state();if state!=previous_update{let _=handle.emit("pilot-update",&state);previous_update=state.clone();}
+                        #[cfg(target_os="macos")]
+                        {
+                            let elapsed=update_clock.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+                            #[cfg(feature="update-validation")] let elapsed=update_validation::elapsed_ms(elapsed);
+                            update_schedule.refresh(&shared,elapsed).await;
+                        }
+                        let state=shared.lock().await.update_state();
+                        #[cfg(feature="update-validation")]
+                        if update_validation::nightly_mode(){let p=shared.lock().await;let _=update_validation::record_poll(&p.root,&state);}
+                        if state!=previous_update{let _=handle.emit("pilot-update",&state);previous_update=state.clone();}
                         #[cfg(target_os="macos")]
                         {
                             if state["status"]=="available" {let _=shared.lock().await.call("downloadAutomaticUpdate",&[]).await;}
@@ -2022,6 +2178,11 @@ fn main() {
         .manage(pilot.clone())
         .invoke_handler(tauri::generate_handler![pilot_rpc,pilot_tray,pilot_smoke_report,pilot_smoke_progress])
         .on_page_load(move |window,payload| {
+            #[cfg(feature = "update-validation")]
+            if window.label()=="main" && payload.event()==tauri::webview::PageLoadEvent::Finished && std::env::args().any(|a|a=="--smoke-update-restarted") {
+                let script=include_str!("../../tools/native/macos-update-validation-smoke.js").replace("location.search.includes('updateRestarted=1')", "true");
+                let _=window.eval(script);
+            }
             #[cfg(target_os="windows")]
             if window.label()=="main" && payload.event()==tauri::webview::PageLoadEvent::Finished { windows_menus::sync_activity(window.app_handle()); }
             if window.label() == "main" && payload.event() == tauri::webview::PageLoadEvent::Finished
@@ -2031,7 +2192,7 @@ fn main() {
                 let _ = std::fs::write(startup_report_root.join("startup-timings.json"), report.to_string());
             }
             if smoke && payload.event()==tauri::webview::PageLoadEvent::Finished
-                && window.label() == "main" { let _=window.show(); let _=window.set_focus(); let script=if std::env::args().any(|arg|arg=="--smoke-setup-update" || arg=="--smoke-setup-restart"){include_str!("../../tools/native/setup-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-reminders"){include_str!("../../tools/native/reminders-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-tray"){include_str!("../../tools/native/tray-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-performance"){include_str!("../../tools/native/performance-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-window-lifecycle"){include_str!("../../tools/native/window-lifecycle-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-theme"){include_str!("../../tools/native/theme-smoke.js")}else if let Some(script)=edition::smoke_script(){script}else if std::env::args().any(|arg|arg=="--smoke-application-reset"){include_str!("../../tools/native/application-reset-smoke.js")}else if argument("--smoke-renderer-restart").is_some(){include_str!("../../tools/native/renderer-restart-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-provider-switch"){include_str!("../../tools/native/provider-switch-native-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-routing"){include_str!("../../tools/native/subscription-routing-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-universal"){include_str!("../../tools/native/universal-native-smoke.js")}else{include_str!("../../tools/native/native-smoke.js")};let _=window.eval(script); }
+                && window.label() == "main" { let _=window.show(); let _=window.set_focus(); let script=if cfg!(feature="update-validation") && std::env::args().any(|arg|arg=="--smoke-nightly-update"){include_str!("../../tools/native/macos-nightly-validation-smoke.js")}else if cfg!(feature="update-validation") && std::env::args().any(|arg|arg=="--smoke-macos-update"){include_str!("../../tools/native/macos-update-validation-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-setup-update" || arg=="--smoke-setup-restart"){include_str!("../../tools/native/setup-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-reminders"){include_str!("../../tools/native/reminders-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-tray"){include_str!("../../tools/native/tray-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-performance"){include_str!("../../tools/native/performance-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-window-lifecycle"){include_str!("../../tools/native/window-lifecycle-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-theme"){include_str!("../../tools/native/theme-smoke.js")}else if let Some(script)=edition::smoke_script(){script}else if std::env::args().any(|arg|arg=="--smoke-application-reset"){include_str!("../../tools/native/application-reset-smoke.js")}else if argument("--smoke-renderer-restart").is_some(){include_str!("../../tools/native/renderer-restart-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-provider-switch"){include_str!("../../tools/native/provider-switch-native-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-routing"){include_str!("../../tools/native/subscription-routing-smoke.js")}else if std::env::args().any(|arg|arg=="--smoke-universal"){include_str!("../../tools/native/universal-native-smoke.js")}else{include_str!("../../tools/native/native-smoke.js")};let _=window.eval(script); }
         })
         .on_window_event(move |window,event| {
             #[cfg(target_os="windows")]

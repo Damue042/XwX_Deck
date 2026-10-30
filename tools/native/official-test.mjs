@@ -56,7 +56,11 @@ try {
  pass('official OAuth uses its configured account root and ignores inactive compatible after provider switching');
  await call('switchClientProvider',{client:'codex',providerId:null,takeOverExternalConfig:true});
  await call('updateCodexEnhancements',{unifySessionHistory:true});
- const unifiedConfig=await readFile(config,'utf8');assert.match(unifiedConfig,/model_provider\s*=\s*"xwx_deck"/);
+ const unifiedConfig=await readFile(config,'utf8');assert.equal(parseToml(unifiedConfig).model_provider,'openai');
+ await call('updateCodexEnhancements',{preserveOfficialLogin:false});
+ assert.equal(parseToml(await readFile(config,'utf8')).model_provider,'xwx_deck');
+ await call('updateCodexEnhancements',{preserveOfficialLogin:true});
+ assert.equal(await readFile(config,'utf8'),unifiedConfig);
  const unified=await call('toggleTracing',true);
  const unifiedResponse=await fetch(unified.localBaseUrl+'/responses',{method:'POST',headers:{'content-type':'application/json'},body:'{"input":"active unified provider"}'});
  assert.equal(unifiedResponse.status,200,await unifiedResponse.clone().text());await unifiedResponse.json();assert.equal(requests.at(-1).path,'/backend-api/codex/responses');

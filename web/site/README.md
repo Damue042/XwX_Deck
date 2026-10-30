@@ -74,7 +74,7 @@ npm run test:site
 GitHub Pages 工作流先构建并验证官网。
 文档发布在站点的 `docs/` 目录。构建使用 Pages 提供的路径，支持独立域名和仓库子路径。
 站点绑定 `xwxdeck.com`，Cloudflare 管理 DNS。
-下载包继续托管在 GitHub Releases。
+更新清单入口使用官网固定路径。安装包使用 R2 版本路径。发布过程见 [域名更新与分发](../../docs/cloudflare-updates.md)。
 下载入口仅在首屏展示。
 主按钮根据浏览器提供的系统和架构推荐已发布安装包。
 无法确定架构时，点击后展开选择，不按 `MacIntel` 猜测芯片。

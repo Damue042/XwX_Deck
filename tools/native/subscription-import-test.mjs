@@ -89,6 +89,7 @@ try{
  await writeFile(authFile,local);assert.equal((await rpc('getProviders')).connections.find(p=>p.id===nativeProvider.id).codexNativeOfficial,true);
  const otherProvider=(await rpc('getProviders')).connections.find(p=>p.subscriptionAccountId===officialId);
  assert.equal(otherProvider.codexNativeOfficial,false);
+ await rpc('updateCodexEnhancements',{preserveOfficialLogin:false});
  const otherSelection=await rpc('switchClientProvider',{client:'codex',providerId:otherProvider.id});assert.ok(!otherSelection.warning?.includes('需要开启 Trace'));assert.equal(await rpc('disableBreaksCodex'),false);assert.ok((await readFile(join(root,'codex/config.toml'),'utf8')).includes('--native-auth-token'));
  assert.equal(await readFile(authFile,'utf8'),local);
  pass('changed native identity and Claude conversion still require intervention; another official account uses native command authentication without overwriting the client login');

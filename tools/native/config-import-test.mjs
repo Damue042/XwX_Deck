@@ -38,7 +38,7 @@ insert.run('loop','claude','CC Proxy',JSON.stringify({env:{ANTHROPIC_BASE_URL:'h
 await writeFile(legacy,JSON.stringify({claude:{providers:{old:{name:'Legacy',settingsConfig:{env:{ANTHROPIC_BASE_URL:base+'/legacy',ANTHROPIC_API_KEY:'fixture-legacy-key',ANTHROPIC_MODEL:'legacy-model'}}}}}}));
 start();
 try{
- await rpc('getState');await rpc('saveProvider',{displayName:'Keeper',baseUrl:base+'/keeper',bearerToken:'fixture-keeper-key',adapter:'responses',codexModel:'kept-model'});await rpc('switchClientProvider',{client:'codex',providerId:'Keeper'});
+ await rpc('getState');await rpc('updateCodexEnhancements',{preserveOfficialLogin:false});await rpc('saveProvider',{displayName:'Keeper',baseUrl:base+'/keeper',bearerToken:'fixture-keeper-key',adapter:'responses',codexModel:'kept-model'});await rpc('switchClientProvider',{client:'codex',providerId:'Keeper'});
  const before=await rpc('getProviders'),clientBefore=await readFile(join(root,'codex/config.toml'),'utf8');
  const hashes=[await digest(magpie),await digest(cc)];const count=requests.length;
  let preview=await rpc('previewConfigurationImport');check('Deck-generated Codex routes are not offered as independent import sources',preview.sources.find(s=>s.source==='codex').items.length===0);const items=preview.sources.filter(s=>s.source==='magpie'||s.source==='cc-switch').flatMap(s=>s.items);

@@ -344,18 +344,23 @@ pub async fn load(root: &Path, keys: &[String]) -> Result<Value> {
     }
     let encoded = base64::engine::general_purpose::STANDARD
         .encode(serde_json::to_vec(keys).map_err(|_| "无法准备偏好迁移")?);
-    let mut child =
-        tokio::process::Command::new(std::env::current_exe().map_err(|_| "无法启动偏好迁移进程")?)
-            .arg("--legacy-renderer-worker")
-            .arg(root.join("Local Storage/leveldb"))
-            .arg("--renderer-keys")
-            .arg(encoded)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|_| "无法启动偏好迁移进程")?;
+    let mut command =
+        tokio::process::Command::new(std::env::current_exe().map_err(|_| "无法启动偏好迁移进程")?);
+    // The isolated acceptance executable enforces its root before dispatching
+    // worker modes too. Preserve that boundary in its own read-only child.
+    #[cfg(feature = "update-validation")]
+    command.arg("--pilot-root").arg(root);
+    let mut child = command
+        .arg("--legacy-renderer-worker")
+        .arg(root.join("Local Storage/leveldb"))
+        .arg("--renderer-keys")
+        .arg(encoded)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|_| "无法启动偏好迁移进程")?;
     let stdout = child.stdout.take().ok_or("无法读取偏好迁移结果")?;
     let reader = tokio::spawn(async move {
         let mut bytes = Vec::new();

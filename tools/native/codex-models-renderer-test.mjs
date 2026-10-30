@@ -192,7 +192,7 @@ try{
  await wait(()=>notices.slice(raceStart).some(n=>n[1]==='模型服务已切换'),'superseded read must not suppress switch success');
  assert.ok(button().textContent.includes('gpt-6-luna'));
  assert.equal(notices.slice(raceStart).filter(n=>n[1]==='模型服务已切换').length,1);
- assert.ok(notices.slice(raceStart).some(n=>n[4]?.description?.includes('新请求使用所选服务')));
+ assert.ok(notices.slice(raceStart).some(n=>n[4]?.description?.includes('模型目录已更新')));
  pass('overlapping same-provider reads preserve the newer model and still notify a committed hot switch once');
  selectionReads=[];const failureStart=notices.length;
  await chooseProvider('race-third');await wait(()=>selectionReads.length===1,'read before genuine failure');

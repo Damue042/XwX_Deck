@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { trackWindowsFolderWindows } from './windows-folder-windows.mjs';
+import { parse as parseToml } from 'smol-toml';
 
 
 const root = await mkdtemp(join(await realpath(tmpdir()), 'xwx-rust-pilot-native-'));
@@ -70,6 +71,7 @@ const desktopFixtures = process.platform === 'win32'
     : ['Cursor.app/Contents/MacOS/Cursor', 'OpenCode.app/Contents/MacOS/OpenCode'];
   for (const name of desktopFixtures) { const path=join(installations,'Applications',name); await mkdir(resolve(path,'..'),{recursive:true}); await writeFile(path,'isolated discovery fixture'); await chmod(path,0o755); }
 const child = spawn(binary, ['--pilot-root', root, '--smoke', '--smoke-upstream', base, ...(nativeOfficialFixture?['--smoke-native-official','--subscription-test-endpoint',base.replace('/v1','')]:[]), ...(!keepOpen ? ['--smoke-exit'] : [])], { env: {...process.env, XWX_DECK_UPDATE_SERVER_URL:base.replace('/v1',''), XWX_SYSTEM_LANGUAGE_TEST:'zh-CN', XWX_CLIENT_INSTALLATIONS_TEST_HOME:installations}, stdio: ['ignore', 'inherit', 'inherit'] });
+console.log(JSON.stringify({testCandidate:{pid:child.pid,binary,root}}));
 try {
   if (process.argv.includes('--fail-after-folder-open')) {
     for (let n = 0; n < 1800; n++) {
@@ -118,7 +120,14 @@ try {
   }
   const directConfig=await readFile(join(root,'codex/config.toml'),'utf8');
   if(nativeOfficialFixture){assert.match(directConfig,/model\s*=\s*"gpt-6-luna"/);assert.ok(!/model_provider\s*=\s*"Native_Second"/.test(directConfig));const auth=JSON.parse(await readFile(join(root,'codex/auth.json'),'utf8'));assert.equal(auth.tokens.refresh_token,'isolated-native-official-refresh');}
-  else assert.ok(directConfig.includes(base));
+  else {
+    // This fresh fixture keeps official login. Inactive cached provider
+    // sections may remain, but direct routing must select the official source.
+    const parsed=parseToml(directConfig);
+    assert.equal(parsed.model_provider,'openai');
+    assert.equal(parsed.base_url,undefined);
+    assert.equal(parsed.model_providers?.openai?.base_url,undefined);
+  }
   console.log(JSON.stringify({ ...report, sandbox: root, nativeHttpRequests: requests.length }, null, 2));
   if (keepOpen) {
     console.log('Native screenshot session ready. The test service can close; Gateway has already stopped.');

@@ -47,10 +47,16 @@ mod windows {
     }
 
     fn startup_directory(path: &Path, nonce: &str) -> Result<(), String> {
-        if nonce.len() != 64 || !nonce.bytes().all(|c| c.is_ascii_hexdigit())
+        if nonce.len() != 64
+            || !nonce.bytes().all(|c| c.is_ascii_hexdigit())
             || !path.is_absolute()
-            || path.file_name().and_then(|v| v.to_str()) != Some(format!("startup-{nonce}").as_str())
-            || path.parent().and_then(Path::file_name).and_then(|v| v.to_str()) != Some("updates")
+            || path.file_name().and_then(|v| v.to_str())
+                != Some(format!("startup-{nonce}").as_str())
+            || path
+                .parent()
+                .and_then(Path::file_name)
+                .and_then(|v| v.to_str())
+                != Some("updates")
         {
             return Err("Invalid startup receipt directory".into());
         }
@@ -76,33 +82,51 @@ mod windows {
         startup_directory(&directory, &nonce)?;
         let challenge = read_startup_json(&directory.join("challenge.json"))?;
         let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-        let requested = PathBuf::from(challenge["executable"].as_str().ok_or("Missing startup executable")?);
+        let requested = PathBuf::from(
+            challenge["executable"]
+                .as_str()
+                .ok_or("Missing startup executable")?,
+        );
         let actual = fs::canonicalize(&executable).map_err(|e| e.to_string())?;
         let requested = fs::canonicalize(requested).map_err(|e| e.to_string())?;
         let actual_hash = hash(&executable)?;
         if challenge["nonce"] != nonce
-            || !actual.to_string_lossy().eq_ignore_ascii_case(&requested.to_string_lossy())
+            || !actual
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&requested.to_string_lossy())
             || challenge["sha256"] != actual_hash
         {
             return Err("Update startup challenge does not match this application".into());
         }
-        let receipt = serde_json::json!({"nonce":nonce,"pid":std::process::id(),"sha256":actual_hash});
+        let receipt =
+            serde_json::json!({"nonce":nonce,"pid":std::process::id(),"sha256":actual_hash});
         let ready = directory.join("ready.json");
         if ready.exists() {
-            return if read_startup_json(&ready)? == receipt { Ok(()) }
-                else { Err("A different application already acknowledged startup".into()) };
+            return if read_startup_json(&ready)? == receipt {
+                Ok(())
+            } else {
+                Err("A different application already acknowledged startup".into())
+            };
         }
         use std::io::Write;
-        let mut file = fs::OpenOptions::new().write(true).create_new(true)
-            .open(directory.join("ready.tmp")).map_err(|e| e.to_string())?;
-        file.write_all(receipt.to_string().as_bytes()).map_err(|e| e.to_string())?;
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join("ready.tmp"))
+            .map_err(|e| e.to_string())?;
+        file.write_all(receipt.to_string().as_bytes())
+            .map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
         drop(file);
         fs::rename(directory.join("ready.tmp"), ready).map_err(|e| e.to_string())?;
         Ok(())
     }
 
-    pub fn launch_and_confirm(mut command: Command, target: &Path, updates: &Path) -> Result<u32, String> {
+    pub fn launch_and_confirm(
+        mut command: Command,
+        target: &Path,
+        updates: &Path,
+    ) -> Result<u32, String> {
         regular(target)?;
         let target = fs::canonicalize(target).map_err(|e| e.to_string())?;
         let updates = fs::canonicalize(updates).map_err(|e| e.to_string())?;
@@ -114,21 +138,28 @@ mod windows {
         startup_directory(&directory, &nonce)?;
         let expected = hash(&target)?;
         let challenge = serde_json::json!({"nonce":nonce,"executable":target,"sha256":expected});
-        fs::write(directory.join("challenge.json"), challenge.to_string()).map_err(|e| e.to_string())?;
-        let mut child = command.env("XWX_DECK_UPDATE_READY_DIR", &directory)
+        fs::write(directory.join("challenge.json"), challenge.to_string())
+            .map_err(|e| e.to_string())?;
+        let mut child = command
+            .env("XWX_DECK_UPDATE_READY_DIR", &directory)
             .env("XWX_DECK_UPDATE_READY_NONCE", &nonce)
             .env("XWX_DECK_UPDATE_EXPECTED_SHA256", &expected)
-            .creation_flags(0x08000000).spawn().map_err(|e| format!("自动启动失败：{e}"))?;
+            .creation_flags(0x08000000)
+            .spawn()
+            .map_err(|e| format!("自动启动失败：{e}"))?;
         let started = std::time::Instant::now();
         let mut acknowledged = None;
         loop {
             if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
-                return Err(format!("新版启动未完成，进程已退出（{status}）。新文件与恢复备份均保留，请手动检查。"));
+                return Err(format!(
+                    "新版启动未完成，进程已退出（{status}）。新文件与恢复备份均保留，请手动检查。"
+                ));
             }
             let ready = directory.join("ready.json");
             if ready.exists() {
                 let receipt = read_startup_json(&ready)?;
-                if receipt["nonce"] != nonce || receipt["pid"].as_u64() != Some(u64::from(child.id()))
+                if receipt["nonce"] != nonce
+                    || receipt["pid"].as_u64() != Some(u64::from(child.id()))
                     || receipt["sha256"] != expected
                 {
                     return Err("新版启动确认不匹配。新文件与恢复备份均保留，请手动检查。".into());
@@ -138,13 +169,19 @@ mod windows {
                 }
                 let at = acknowledged.get_or_insert_with(std::time::Instant::now);
                 if at.elapsed() >= READY_GRACE {
-                    if hash(&target)? != expected { return Err("启动确认后的文件校验失败，已保留恢复备份。".into()); }
-                    fs::write(directory.join("confirmed.json"), receipt.to_string()).map_err(|e| e.to_string())?;
+                    if hash(&target)? != expected {
+                        return Err("启动确认后的文件校验失败，已保留恢复备份。".into());
+                    }
+                    fs::write(directory.join("confirmed.json"), receipt.to_string())
+                        .map_err(|e| e.to_string())?;
                     return Ok(child.id());
                 }
             }
             if started.elapsed() >= STARTUP_TIMEOUT {
-                return Err("等待新版就绪超时。新程序可能仍在运行，新文件与恢复备份均保留，请手动检查。".into());
+                return Err(
+                    "等待新版就绪超时。新程序可能仍在运行，新文件与恢复备份均保留，请手动检查。"
+                        .into(),
+                );
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -179,12 +216,15 @@ mod windows {
                 command.arg(flag).arg(root);
             }
         }
-        command.creation_flags(0x08000000)
+        command
+            .creation_flags(0x08000000)
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
     }
-    pub fn nightly_window(hour: u32, idle_ms: u64) -> bool { (2..5).contains(&hour) && idle_ms >= 900_000 }
+    pub fn nightly_window(hour: u32, idle_ms: u64) -> bool {
+        (2..5).contains(&hour) && idle_ms >= 900_000
+    }
     pub fn idle_for_nightly() -> bool {
         use chrono::Timelike;
         #[repr(C)]
@@ -292,13 +332,19 @@ mod windows {
             for flag in ["--pilot-root", "--data-root"] {
                 if let Some(value) = args.windows(2).find(|pair| pair[0] == flag) {
                     let root = fs::canonicalize(&value[1]).map_err(|e| e.to_string())?;
-                    if flag == "--pilot-root" && fs::read_to_string(root.join(".xwx-rust-pilot")).ok().as_deref() != Some("isolated-rust-pilot-v1\n") {
+                    if flag == "--pilot-root"
+                        && fs::read_to_string(root.join(".xwx-rust-pilot"))
+                            .ok()
+                            .as_deref()
+                            != Some("isolated-rust-pilot-v1\n")
+                    {
                         return Err("隔离数据目录无效".into());
                     }
                     command.arg(flag).arg(root);
                 }
             }
-            launch_and_confirm(command, &target, source.parent().unwrap()).map_err(|error| format!("{error} 恢复备份：{}", backup.display()))?;
+            launch_and_confirm(command, &target, source.parent().unwrap())
+                .map_err(|error| format!("{error} 恢复备份：{}", backup.display()))?;
             Ok(())
         })();
         if let Err(error) = result {
@@ -312,4 +358,6 @@ mod windows {
     }
 }
 #[cfg(target_os = "windows")]
-pub use windows::{acknowledge_startup, idle_for_nightly, launch_and_confirm, nightly_window, spawn, worker};
+pub use windows::{
+    acknowledge_startup, idle_for_nightly, launch_and_confirm, nightly_window, spawn, worker,
+};

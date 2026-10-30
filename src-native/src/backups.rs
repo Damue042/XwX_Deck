@@ -311,7 +311,10 @@ mod tests {
     #[test]
     fn restore_reasons_preserve_format_and_target_failures_while_trace_runs() {
         assert_eq!(restore_state("archive", false, false, true), "unsupported");
-        assert_eq!(restore_state("settings", false, true, true), "invalid-backup");
+        assert_eq!(
+            restore_state("settings", false, true, true),
+            "invalid-backup"
+        );
         assert_eq!(restore_state("codex", true, false, true), "unsafe-target");
         assert_eq!(restore_state("settings", true, true, true), "trace-active");
         assert_eq!(restore_state("codex", true, true, false), "ready");

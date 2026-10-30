@@ -6,7 +6,9 @@ import path from 'node:path';
 const directory = path.resolve(process.argv[2] || 'release-assets');
 const version = requiredEnv('RELEASE_VERSION');
 const tag = requiredEnv('RELEASE_TAG');
-const repository = requiredEnv('GITHUB_REPOSITORY');
+const unsignedPreview = process.argv.includes('--unsigned-preview');
+const keychainSigning = process.argv.includes('--keychain');
+if(unsignedPreview && keychainSigning)throw Error('Choose unsigned preview or manual Keychain signing');
 if (tag !== `v${version}`) throw new Error(`Release tag ${tag} does not match version ${version}.`);
 
 const contract = JSON.parse(await readFile(new URL('../../release-contract.json', import.meta.url), 'utf8'));
@@ -30,7 +32,7 @@ for (const definition of artifactDefinitions) {
   const details = await stat(file);
   const sha256 = await hash(file, 'sha256', 'hex');
   const sha512 = await hash(file, 'sha512', 'base64');
-  const url = `https://github.com/${repository}/releases/download/${tag}/${encodeURIComponent(definition.name)}`;
+  const url = `https://download.xwxdeck.com/releases/${tag}/${definition.name}`;
   files.push({
     platform: definition.platform,
     arch: definition.arch,
@@ -64,7 +66,7 @@ if (start < 0) throw new Error(`Missing changelog for ${version}`);
 const next = changelogSource.indexOf('\n## [', start + heading.length);
 const releaseChanges = changelogSource.slice(start, next < 0 ? undefined : next).trim();
 const publishedAt = new Date().toISOString();
-await writeFile(path.join(directory, 'release.json'), `${JSON.stringify({
+const manifest = {
   schemaVersion: 1,
   channel: 'release',
   releaseSeries: 'native-v1',
@@ -73,7 +75,18 @@ await writeFile(path.join(directory, 'release.json'), `${JSON.stringify({
   publishedAt,
   changelog: releaseChanges,
   files
-}, null, 2)}\n`, 'utf8');
+};
+if (unsignedPreview) {
+  await writeFile(path.join(directory, 'release-unsigned.json'), JSON.stringify(manifest, null, 2) + '\n');
+} else {
+  const { signManifest, verifyEnvelope } = await import('./update-signature.mjs');
+  const trust = JSON.parse(await readFile(new URL('../../assets/update-trust.json', import.meta.url), 'utf8'));
+  const envelope = keychainSigning
+    ? await (await import('./keychain-signing.mjs')).signWithKeychain(manifest,trust)
+    : signManifest(manifest, requiredEnv('XWX_RELEASE_SIGNING_KEY_PEM'), requiredEnv('XWX_RELEASE_SIGNING_KEY_ID'));
+  verifyEnvelope(envelope, trust);
+  await writeFile(path.join(directory, 'release.json'), JSON.stringify(envelope, null, 2) + '\n');
+}
 await writeFile(path.join(directory, 'checksums.txt'), `${checksumLines.join('\n')}\n`, 'utf8');
 await writeFile(path.join(directory, 'release-notes.md'), [
   `# XwX Deck ${version}`,

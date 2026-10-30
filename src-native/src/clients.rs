@@ -114,7 +114,10 @@ impl OfficialCatalog {
             if id.is_empty() || row["visibility"] != "list" || row["supported_in_api"] == false {
                 continue;
             }
-            let mut entry = with_codex_metadata(json!({"id":id,"vendor":"OpenAI","protocols":["openai-responses"],"clients":["codex"],"protocolsDeclared":true}), row);
+            let mut entry = with_codex_metadata(
+                json!({"id":id,"vendor":"OpenAI","protocols":["openai-responses"],"clients":["codex"],"protocolsDeclared":true}),
+                row,
+            );
             if row["display_name"].is_string() {
                 entry["displayName"] = row["display_name"].clone();
             }
@@ -151,7 +154,11 @@ impl OfficialCatalog {
 
 fn with_codex_metadata(mut entry: Value, raw: &Value) -> Value {
     catalog::metadata::attach(&mut entry, raw);
-    if let Some(capabilities) = entry.as_object_mut().unwrap().remove("providerCapabilities") {
+    if let Some(capabilities) = entry
+        .as_object_mut()
+        .unwrap()
+        .remove("providerCapabilities")
+    {
         entry["nativeCapabilities"] = capabilities;
     }
     entry

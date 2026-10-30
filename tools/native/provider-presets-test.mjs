@@ -47,7 +47,7 @@ function rpc(method, ...args) { return new Promise((resolve, reject) => {
 try {
   assert.equal(OFFICIAL_PROVIDERS.length, Object.keys(expectedPaths).length);
   assert.equal(OFFICIAL_PROVIDERS[0].id, 'deepseek');
-  await clearFreshCompatibleFixture(rpc);
+  await clearFreshCompatibleFixture(rpc); await rpc('updateCodexEnhancements', {preserveOfficialLogin:false});
   for (const preset of OFFICIAL_PROVIDERS) {
     const draft = newProviderDraft([], preset.id);
     assert.equal(draft.bearerToken, '');
