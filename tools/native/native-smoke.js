@@ -396,7 +396,10 @@
       document.querySelector('[data-subscription-service=chatgpt]').click(); await delay(150);
       await wait(() => document.querySelector('.subscription-login-button') && !document.querySelector('.subscription-login-button').disabled, 'native account registry read');
       await wait(() => document.querySelector('[data-subscription-service=chatgpt]')?.dataset.unconfigured === 'true', 'confirmed empty subscription readiness');
-      check('confirmed signed-out subscription remains muted, selected and actionable', document.querySelector('[data-subscription-service=chatgpt]').getAttribute('aria-pressed') === 'true' && !document.querySelector('[data-subscription-service=chatgpt]').disabled && getComputedStyle(document.querySelector('[data-subscription-service=chatgpt]')).color === getComputedStyle(document.querySelector('[data-service=deepseek]')).color);
+      const signedOutCard=document.querySelector('[data-subscription-service=chatgpt]'),mutedProbe=document.createElement('span');
+      mutedProbe.style.color='var(--quiet)';document.body.append(mutedProbe);
+      const mutedEvidence={selected:signedOutCard.getAttribute('aria-pressed'),disabled:signedOutCard.disabled,color:getComputedStyle(signedOutCard).color,expected:getComputedStyle(mutedProbe).color,hiddenReferenceColor:getComputedStyle(document.querySelector('[data-service=deepseek]')).color};mutedProbe.remove();
+      check('confirmed signed-out subscription remains muted, selected and actionable '+JSON.stringify(mutedEvidence), mutedEvidence.selected==='true' && !mutedEvidence.disabled && mutedEvidence.color===mutedEvidence.expected);
       check('empty subscriptions show the sign-in action without redundant desktop or empty-state instructions', !document.querySelector('.subscription-empty') && !document.querySelector('#configuration-accounts').textContent.includes('请在桌面应用中添加订阅账号'));
       check('subscriptions use flat native account panel without key fields', document.querySelectorAll('[role=dialog]:not([data-position])').length===1 && !document.querySelector('#configuration-accounts input[type=password]') && !document.querySelector('.subscription-login-button').disabled);
       const visibleLogin = () => [...document.querySelectorAll('#configuration-accounts .subscription-login-button')].find(button => button.getBoundingClientRect().height > 0);

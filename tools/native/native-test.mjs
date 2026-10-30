@@ -8,13 +8,17 @@ import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { trackWindowsFolderWindows } from './windows-folder-windows.mjs';
 import { parse as parseToml } from 'smol-toml';
+import { verifyCandidate } from './source-fingerprint.mjs';
 
 
 const root = await mkdtemp(join(await realpath(tmpdir()), 'xwx-rust-pilot-native-'));
 await writeFile(join(root, '.xwx-rust-pilot'), 'isolated-rust-pilot-v1\n');
 const folderWindows = await trackWindowsFolderWindows(root);
 const installations=join(root,'installations');
-let binary = process.env.XWX_NATIVE_TEST_BINARY ? resolve(process.env.XWX_NATIVE_TEST_BINARY) : resolve(import.meta.dirname, process.platform==='darwin'?'../../test-results/rust-pilot-package/XwXDeck Rust Validation.app/Contents/MacOS/xwx-deck-native':'../../test-results/native-target/release/xwx-deck-native.exe');
+const defaultBuildReport = process.platform === 'darwin' ? 'test-results/rust-pilot-package/native-build-report.json' : 'test-results/native-package/native-build-report.json';
+const build = JSON.parse(await readFile(resolve(process.env.XWX_NATIVE_TEST_BUILD_REPORT ?? defaultBuildReport),'utf8'));
+let binary = resolve(process.env.XWX_NATIVE_TEST_BINARY ?? build.candidate.binary);
+const provenance = await verifyCandidate({root:resolve('.'),report:build,binary,allowManualAcceptance:Boolean(process.env.XWX_NATIVE_TEST_BINARY && process.env.XWX_NATIVE_TEST_BUILD_REPORT)});
 const binarySha256=createHash('sha256').update(await readFile(binary)).digest('hex');
 // The application selects updates for its own architecture, including Rosetta.
 let candidateArch=process.arch;
@@ -102,7 +106,7 @@ try {
   if(!report) { const progress=await readFile(join(root,'native-smoke-progress.json'),'utf8').then(JSON.parse).catch(()=>({checks:[]})); report={...progress,passed:false,error:'Native smoke timed out'}; }
   if(nativeOfficialFixture&&!report.checks?.includes('native official selection stays direct with Trace and Gateway off')){report.passed=false;report.error??='Native official acceptance did not execute';}
   await mkdir(resolve('test-results'),{recursive:true});
-  await writeFile(resolve('test-results/native-webview-summary.json'),JSON.stringify({...report,binarySha256,nativeHttpRequests:requests.length,controlledActivation:process.env.XWX_NATIVE_TEST_ACTIVATE==='1',syntheticUpstream:true},null,2)+'\n');
+  await writeFile(resolve('test-results/native-webview-summary.json'),JSON.stringify({...report,provenance,binarySha256,nativeHttpRequests:requests.length,controlledActivation:process.env.XWX_NATIVE_TEST_ACTIVATE==='1',syntheticUpstream:true},null,2)+'\n');
   const viewer=await readFile(join(root,'traces/native-viewer-smoke.json'),'utf8').then(JSON.parse,()=>({passed:false,error:'Viewer did not report for this candidate'}));
   // Always replace both reports, including failure, so a previous package's
   // successful Viewer result cannot be mistaken for this run's evidence.
