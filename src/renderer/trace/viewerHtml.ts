@@ -1,3 +1,4 @@
+import { traceCompatibility } from '../../shared/edition';
 import { TapTraceRecord, TapSessionSummary } from '../../shared/trace-types';
 import { CLIENT_DOWNLOADS, traceClientLabel } from '../../shared/clientDownloads';
 import { getPriceRules } from '../../shared/trace-pricing';
@@ -841,7 +842,8 @@ let confirmDeleteReturnFocus = null;
 const SEARCH_RESULT_LIMIT = 80;
 const DETAIL_UI_CACHE_LIMIT = 24;
 const detailUiCache = new Map();
-const ROUTE_STATE_KEY = 'xwxTraceView';
+const EDITION_TRACE = ${JSON.stringify(traceCompatibility).replace(/</g, '\\u003c')};
+const ROUTE_STATE_KEY = EDITION_TRACE.storageKeys.route;
 let dashboardReturnContext = null;
 // 侧栏子 Agent 块的折叠状态：记被折叠的 group key（agent + 起始 turn）。
 let subagentCollapsed = {};
@@ -1128,7 +1130,7 @@ function currentDeferredLogFields(){
   const t = currentTrace();
   const traceId = t && t.id || '';
   if(logFieldCache.traceId !== traceId || logFieldCache.format !== traceFormat) {
-    cacheDeferredLogFields(t, deferredLogProjection(t).entries);
+    cacheDeferredLogFields(t, deferredLogProjection(rawTraceValue(t)).entries);
   }
   return logFieldCache.entries;
 }
@@ -1439,16 +1441,16 @@ function isSessionLoading(sid){ return !!(sid && sessionLoadState[sid] === 'load
 function currentTrace(){ const list = traces(); return (restoredDetailTrace && restoredDetailTrace.id === selectedId ? restoredDetailTrace : undefined) || list.find(t => t.id === selectedId) || list[list.length - 1]; }
 function currentIndex(){ return traces().findIndex(t => t.id === selectedId); }
 function currentSession(){ return state.sessions.find(s => s.id === selectedSessionId) || state.sessions[0]; }
-function readSectionState(){ try { return JSON.parse(localStorage.getItem('xwxTraceSections') || '{}') || {}; } catch { return {}; } }
-function writeSectionState(){ try { localStorage.setItem('xwxTraceSections', JSON.stringify(sectionState)); } catch {} }
+function readSectionState(){ try { return JSON.parse(localStorage.getItem(EDITION_TRACE.storageKeys.sections) || '{}') || {}; } catch { return {}; } }
+function writeSectionState(){ try { localStorage.setItem(EDITION_TRACE.storageKeys.sections, JSON.stringify(sectionState)); } catch {} }
 // 指标条折叠态：首次（读到 null）默认展开，让用户看见里面有 token/耗时明细；之后尊重用户选择。
-function readMetricsOpen(){ try { const v = localStorage.getItem('xwxTraceMetricsOpen'); return v === null ? true : v === '1'; } catch { return true; } }
-function writeMetricsOpen(){ try { localStorage.setItem('xwxTraceMetricsOpen', metricsOpen ? '1' : '0'); } catch {} }
+function readMetricsOpen(){ try { const v = localStorage.getItem(EDITION_TRACE.storageKeys.metrics); return v === null ? true : v === '1'; } catch { return true; } }
+function writeMetricsOpen(){ try { localStorage.setItem(EDITION_TRACE.storageKeys.metrics, metricsOpen ? '1' : '0'); } catch {} }
 const DASH_COL_ORDER = ['started','first','source','model','duration','requests','tokens','cost','actions'];
 const DASH_COL_DEFAULTS = { started:166, first:280, source:76, model:120, duration:80, requests:72, tokens:112, cost:96, actions:48 };
 const DASH_COL_MIN = { started:166, first:120, source:68, model:96, duration:64, requests:72, tokens:100, cost:88, actions:44 };
 const DASH_COL_MAX = 720;
-const DASH_COL_STORAGE_KEY = 'xwxTraceDashCols';
+const DASH_COL_STORAGE_KEY = EDITION_TRACE.storageKeys.columns;
 let dashColOverrides = {};
 let dashColWidths = readDashColWidths();
 let dashColDidResize = false;
@@ -1457,9 +1459,9 @@ function readDashColWidths(){
   const next = Object.assign({}, DASH_COL_DEFAULTS);
   try {
     const saved = localStorage.getItem(DASH_COL_STORAGE_KEY);
-    const raw = JSON.parse(saved || '{}') || {};
+    const raw = JSON.parse(saved || (EDITION_TRACE.legacyColumnsKey ? localStorage.getItem(EDITION_TRACE.legacyColumnsKey) : null) || '{}') || {};
     for(const id of DASH_COL_ORDER){
-      if(raw[id] != null){
+      if(raw[id] != null && (saved || raw[id] !== EDITION_TRACE.legacyColumnDefaults[id])){
         next[id] = clampDashColWidth(id, raw[id]);
         dashColOverrides[id] = next[id];
       }
@@ -3734,8 +3736,15 @@ function renderReadView(t){
 }
 // 对比视图只比较不属于 Messages/System/Tools 的请求字段；阅读视图不展示这些原始参数。
 const PARAM_DIFF_SKIP = ['messages','system','tools','input','instructions','contents','systemInstruction','functions'];
+function rawTraceValue(t){
+  const key = EDITION_TRACE.derivedContextKey;
+  if(!key || !t || !t.context || t[key]) return t;
+  const value = Object.assign({}, t, { [key]: t.context });
+  delete value.context;
+  return value;
+}
 function renderRawView(t){
-  const rawTrace = t;
+  const rawTrace = rawTraceValue(t);
   const fmtBar = '<div class="fmt-bar" role="tablist"><span class="seg-thumb"></span>'+
     [['json','JSON'],['pretty','PRETTY'],['curl','cURL']].map(f => '<button class="fmt-btn '+(traceFormat===f[0]?'active':'')+'" data-fmt="'+f[0]+'">'+f[1]+'</button>').join('')+
   '</div>';
@@ -4088,7 +4097,7 @@ function normalizeMessage(m){
   // 不透明条目不猜来源；保留协议类型和原始对象，供 RAW 核对。
   if(m.type === 'compaction' || m.type === 'compaction_summary' || m.type === 'context_compaction'){
     const raw = typeof m.encrypted_content === 'string' ? m.encrypted_content : '';
-    const prefix = raw.indexOf('xwxc1:') === 0 ? 'xwxc1:' : undefined;
+    const prefix = EDITION_TRACE.compactionPrefixes.find(prefix => raw.indexOf(prefix) === 0);
     const decoded = prefix ? b64Utf8(raw.slice(prefix.length)) : '';
     const text = decoded
       || (prefix

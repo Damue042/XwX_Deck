@@ -97,6 +97,71 @@ fn spawn_windows_update(path: &std::path::Path, state: &Value) -> Result<(), Str
     }
 }
 
+#[cfg(target_os = "windows")]
+#[derive(Default)]
+struct WindowsUpdateSchedule { last_check_ms: Option<u64> }
+
+#[cfg(target_os = "windows")]
+impl WindowsUpdateSchedule {
+    async fn tick(&mut self, shared: &Shared, elapsed_ms: u64, night_idle: bool) -> Option<Value> {
+        let due = self.last_check_ms.map_or(elapsed_ms >= 6000, |last| elapsed_ms.saturating_sub(last) >= 1_800_000);
+        let state = shared.lock().await.update_state();
+        if due && !["downloading", "ready", "checking"].contains(&state["status"].as_str().unwrap_or("")) {
+            self.last_check_ms = Some(elapsed_ms);
+            let updates = shared.lock().await.updates_context();
+            let _ = updates.check().await;
+        }
+        if !night_idle { return None; }
+        let mut pilot = shared.lock().await;
+        if pilot.active() || !pilot.nightly_eligible() { return None; }
+        let state = pilot.update_state();
+        if state["status"] == "available" { let _ = pilot.call("downloadAutomaticUpdate", &[]).await; }
+        if state["status"] == "ready" { return pilot.call("restartAndInstall", &[]).await.ok(); }
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn isolated_update_clock(root: &std::path::Path) -> Option<PathBuf> {
+    if !std::env::args().any(|a| a == "--rpc") { return None; }
+    let requested = std::fs::canonicalize(argument("--test-nightly-clock")?).ok()?;
+    let expected = std::fs::canonicalize(root.join("update-test-clock.json")).ok()?;
+    if requested != expected || std::fs::read_to_string(root.join(".xwx-rust-pilot")).ok()?.as_str() != "isolated-rust-pilot-v1\n" { return None; }
+    Some(requested)
+}
+
+#[cfg(target_os = "windows")]
+async fn run_isolated_update_clock(shared: Shared, clock: PathBuf, root: PathBuf) {
+    use std::io::Write;
+    let mut schedule = WindowsUpdateSchedule::default();
+    let mut prior = Value::Null;
+    let mut previous_ms = 0;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let valid = (|| -> Option<Value> {
+            let info = std::fs::symlink_metadata(&clock).ok()?;
+            if !info.is_file() || info.file_type().is_symlink() || info.len() > 1024 { return None; }
+            serde_json::from_slice(&std::fs::read(&clock).ok()?).ok()
+        })();
+        let Some(value) = valid else { continue; };
+        let (Some(elapsed), Some(hour), Some(idle)) = (value["elapsedMs"].as_u64(), value["hour"].as_u64(), value["idleMs"].as_u64()) else { continue; };
+        if elapsed < previous_ms || hour >= 24 { continue; }
+        previous_ms = elapsed;
+        let plan = schedule.tick(&shared, elapsed, portable_update::nightly_window(hour as u32, idle)).await;
+        let state = shared.lock().await.update_state();
+        if state != prior || plan.is_some() {
+            let event = json!({"clock":value,"state":state,"handoff":plan});
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(root.join("nightly-test-events.jsonl")) {
+                let _ = writeln!(file, "{event}");
+            }
+            prior = state;
+        }
+        // The production host exits at handoff. The isolated RPC process stays
+        // available for assertions and never runs an installer or replaces an EXE.
+        if plan.is_some() { return; }
+    }
+}
+
 // Menu IDs carry a direction: a stale Stop click must never start Trace.
 fn request_trace_from_tray(app: &tauri::AppHandle, enabled: bool) {
     show_main(app);
@@ -1712,6 +1777,10 @@ fn main() {
     });
     let backend_ready_ms = startup_clock.elapsed().as_millis();
     if rpc_mode {
+        #[cfg(target_os = "windows")]
+        if let Some(clock) = isolated_update_clock(&root) {
+            tauri::async_runtime::spawn(run_isolated_update_clock(pilot.clone(), clock, root.clone()));
+        }
         let metadata =
             tauri::async_runtime::block_on(async { pilot.lock().await.metadata_context() });
         metadata.start(pilot.clone(), std::sync::Arc::new(|_| {}));
@@ -1918,8 +1987,12 @@ fn main() {
                         Ok(state)=>{let _=handle.emit("pilot-state",state);},
                         Err(error)=>{let mut state=shared.lock().await.state();state["lastError"]=json!(error);let _=handle.emit("pilot-state",state);}
                     }
-                    tokio::time::sleep(std::time::Duration::from_millis(6000)).await;
-                    let updates=shared.lock().await.updates_context();if updates.state()["status"]=="idle"{if let Ok(state)=updates.check().await{let _=handle.emit("pilot-update",state);}}
+                    #[cfg(not(target_os="windows"))] {
+                        tokio::time::sleep(std::time::Duration::from_millis(6000)).await;
+                        let updates=shared.lock().await.updates_context();if updates.state()["status"]=="idle"{if let Ok(state)=updates.check().await{let _=handle.emit("pilot-update",state);}}
+                    }
+                    #[cfg(target_os="windows")] let update_clock = std::time::Instant::now();
+                    #[cfg(target_os="windows")] let mut update_schedule = WindowsUpdateSchedule::default();
                     let mut previous_update=Value::Null;
                     loop{
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -1935,11 +2008,9 @@ fn main() {
                                 }
                             }
                         }
-                        #[cfg(target_os="windows")]if portable_update::idle_for_nightly(){
-                            let mut p=shared.lock().await;if !p.active()&&p.nightly_eligible(){
-                                if state["status"]=="available"{let _=p.call("downloadAutomaticUpdate",&[]).await;}
-                                if state["status"]=="ready"{if let Ok(installer)=p.call("restartAndInstall",&[]).await{if let Some(path)=installer["path"].as_str(){if spawn_windows_update(std::path::Path::new(path),&installer).is_ok(){handle.exit(0);}}}}
-                            }
+                        #[cfg(target_os="windows")]
+                        if let Some(installer) = update_schedule.tick(&shared, update_clock.elapsed().as_millis().min(u128::from(u64::MAX)) as u64, portable_update::idle_for_nightly()).await {
+                            if let Some(path)=installer["path"].as_str(){if spawn_windows_update(std::path::Path::new(path),&installer).is_ok(){handle.exit(0);}}
                         }
                     }
                 });

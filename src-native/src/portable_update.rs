@@ -184,6 +184,7 @@ mod windows {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+    pub fn nightly_window(hour: u32, idle_ms: u64) -> bool { (2..5).contains(&hour) && idle_ms >= 900_000 }
     pub fn idle_for_nightly() -> bool {
         use chrono::Timelike;
         #[repr(C)]
@@ -205,9 +206,8 @@ mod windows {
         };
         let hour = chrono::Local::now().hour();
         unsafe {
-            (2..5).contains(&hour)
-                && GetLastInputInfo(&mut input) != 0
-                && GetTickCount().wrapping_sub(input.time) >= 900000
+            GetLastInputInfo(&mut input) != 0
+                && nightly_window(hour, u64::from(GetTickCount().wrapping_sub(input.time)))
         }
     }
     pub fn worker() -> Option<i32> {
@@ -312,4 +312,4 @@ mod windows {
     }
 }
 #[cfg(target_os = "windows")]
-pub use windows::{acknowledge_startup, idle_for_nightly, launch_and_confirm, spawn, worker};
+pub use windows::{acknowledge_startup, idle_for_nightly, launch_and_confirm, nightly_window, spawn, worker};

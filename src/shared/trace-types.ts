@@ -1,3 +1,4 @@
+import type { EditionTraceFields } from './edition';
 import type { DownloadClientId } from './clientDownloads';
 
 export type TapApiType = 'messages' | 'chat-completions' | 'responses' | 'unknown';
@@ -224,7 +225,7 @@ export interface TapSubagentInfo {
   readonly agentId?: string;
 }
 
-export interface TapTraceRecord {
+export interface TapTraceRecord extends EditionTraceFields {
   readonly provider?: { readonly id: string; readonly name: string; readonly connectionId: string };
   readonly id: string;
   readonly sessionId?: string;

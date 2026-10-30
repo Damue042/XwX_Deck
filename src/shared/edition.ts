@@ -13,3 +13,6 @@ export function legacyCatalogProtocol(provider: {adapter?:string}|undefined, ent
 
 export const editionProviderPresets=[] as const;
 export const editionDefaultProviderPreset='deepseek';
+
+export interface EditionTraceFields {}
+export const traceCompatibility = {"storageKeys":{"route":"xwxTraceView","sections":"xwxTraceSections","metrics":"xwxTraceMetricsOpen","columns":"xwxTraceDashCols"},"legacyColumnsKey":null,"legacyColumnDefaults":{},"derivedContextKey":null,"compactionPrefixes":["xwxc1:"]} as const;
