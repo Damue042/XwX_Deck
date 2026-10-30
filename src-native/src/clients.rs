@@ -1,4 +1,43 @@
 use super::*;
+
+// Only an explicit service selection may initialize a never-managed CLI home.
+// Existing homes and their permissions are left to the normal merge path.
+fn initialize_first_client_home(home: &Path, previously_managed: bool) -> Result<()> {
+    match fs::symlink_metadata(home) {
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(err(error)),
+    }
+    if previously_managed {
+        return Err("客户端配置目录已消失。请先恢复目录，服务选择和恢复记录已保留".into());
+    }
+    if !home.is_absolute() || home.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+        return Err("客户端配置目录必须是有效绝对路径".into());
+    }
+    let parent = home.parent().ok_or("客户端配置目录没有有效父目录")?;
+    for ancestor in parent.ancestors() {
+        let metadata = fs::symlink_metadata(ancestor)
+            .map_err(|_| "客户端配置的父目录不存在。请先恢复或建立父目录".to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("客户端配置目录不能经过链接或文件，原位置已保留".into());
+        }
+    }
+    if !same_physical_path(parent)? {
+        return Err("客户端配置目录经过重定向，原位置已保留".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        fs::DirBuilder::new().mode(0o700).create(home).map_err(err)?;
+    }
+    #[cfg(not(unix))]
+    fs::create_dir(home).map_err(err)?;
+    if !same_physical_path(home)? {
+        return Err("客户端配置目录在初始化期间发生变化，现有现场已保留".into());
+    }
+    Ok(())
+}
+
 pub(super) const CLAUDE_KEYS: &[&str] = &[
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
@@ -302,6 +341,15 @@ impl Pilot {
                 })
             }
         }
+    }
+
+    pub(super) fn prepare_first_client_home(&self, client: &str) -> Result<()> {
+        let (home, journal) = match client {
+            "codex" => (self.codex_home(), "codex-direct.json"),
+            "claude" => (self.claude_dir(), "claude-direct.json"),
+            _ => return Err("无效客户端".into()),
+        };
+        initialize_first_client_home(&home, self.root.join(journal).exists())
     }
 
     pub(super) async fn prepare_native_auth(&mut self) -> Result<()> {
@@ -1433,5 +1481,61 @@ mod subscription_metadata_tests {
             json!(["none", "low", "high", "max"])
         );
         assert_eq!(entry["defaultReasoningLevel"], "high");
+    }
+}
+
+#[cfg(test)]
+mod first_client_home_tests {
+    use super::*;
+    fn root(name: &str) -> PathBuf {
+        let base = fs::canonicalize(std::env::temp_dir()).unwrap();
+        let root = base.join(format!("xwx-first-home-{}-{}-{}", std::process::id(), name, millis()));
+        fs::create_dir(&root).unwrap();
+        root
+    }
+    #[test]
+    fn explicit_first_selection_initializes_only_the_new_leaf() {
+        let root = root("new");
+        let home = root.join("codex");
+        initialize_first_client_home(&home, false).unwrap();
+        assert!(home.is_dir());
+        let file = home.join("config.toml");
+        fs::write(&file, "existing user content").unwrap();
+        initialize_first_client_home(&home, false).unwrap();
+        assert_eq!(fs::read_to_string(file).unwrap(), "existing user content");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn a_deleted_managed_home_is_not_recreated() {
+        let root = root("managed");
+        let home = root.join("codex");
+        assert!(initialize_first_client_home(&home, true).is_err());
+        assert!(!home.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn missing_parent_is_not_recreated_as_a_side_effect() {
+        let root = root("parent");
+        let parent = root.join("user-removed");
+        assert!(initialize_first_client_home(&parent.join("codex"), false).is_err());
+        assert!(!parent.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_parent_cannot_create_a_home_in_another_directory() {
+        let root = root("link");
+        let target = root.join("target");
+        fs::create_dir(&target).unwrap();
+        let link = root.join("linked");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(initialize_first_client_home(&link.join("codex"), false).is_err());
+        assert!(!target.join("codex").exists());
+        fs::remove_dir_all(root).unwrap();
     }
 }

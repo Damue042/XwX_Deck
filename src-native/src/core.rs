@@ -2782,7 +2782,11 @@ impl Pilot {
                 let mut changed=false;
                 for key in ["preserveOfficialLogin","unifySessionHistory"]{if let Some(v)=input.get(key){if !v.is_boolean(){return Err("无效增强设置".into());}self.settings.codex_enhancements[key]=v.clone();changed=true;}}
                 if !changed{return Err("无效增强设置".into());}self.persist()?;
-                self.write_direct(false)?;
+                // A local preference does not create an unused external CLI home.
+                if self.selected().is_some() || self.config_path().exists() || self.root.join("codex-direct.json").exists() || self.active() {
+                    self.prepare_first_client_home("codex")?;
+                    self.write_direct(false)?;
+                }
                 let outcome=if input["unifySessionHistory"]==true&&input["migrateExisting"]==true {Some(self.history_update(false)?)}else if input["unifySessionHistory"]==false&&input["restoreExisting"]==true{Some(self.history_update(true)?)}else{None};
                 let mut snapshot=Box::pin(self.call("getCodexEnhancements",&[])).await?;if let Some(outcome)=outcome{snapshot["history"]=outcome;}Ok(snapshot)
             }
@@ -2973,6 +2977,9 @@ impl Pilot {
                 self.settings.other.insert(format!("{client}PreferredMode"),json!(if selected.is_null(){"official"}else{"compatible"}));
                 self.settings.selected[client] = selected;
                 self.persist()?;
+                if self.settings.selected[client].is_string() {
+                    self.prepare_first_client_home(client)?;
+                }
                 if client=="codex" {self.prepare_native_auth().await?;}
                 let takeover = input["takeOverExternalConfig"].as_bool().unwrap_or(false);
                 let old_alias = if client == "codex" {

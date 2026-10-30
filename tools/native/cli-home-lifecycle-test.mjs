@@ -9,6 +9,41 @@ import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { nativeTestBinary, writeCliFixture } from './test-support.mjs';
 
+// A pilot profile pre-creates its CLI homes. Exercise first configuration in
+// normal mode too, with all user and application paths redirected to this fixture.
+async function verifyFirstNormalClientHome() {
+  const {homedir}=await import('node:os'), {dirname}=await import('node:path');
+  const {access,rename}=await import('node:fs/promises');
+  const cli=process.env.XWX_DECK_INSTALLED_CODEX??join(homedir(),'.local/bin/codex');
+  if(!await access(cli).then(()=>true,()=>false)||!(await readFile(nativeTestBinary)).includes(Buffer.from('--acceptance-rpc'))){console.log('SKIP normal CLI first-home regression requires an installed Codex and manual-acceptance binary');return;}
+  const fixture=await mkdtemp(join(await realpath(tmpdir()),'xwx-normal-first-home-'));
+  const app=join(fixture,'app'),home=join(fixture,'home');await mkdir(app);await mkdir(home);
+  const env={...process.env,HOME:home,USERPROFILE:home,APPDATA:join(fixture,'Roaming'),LOCALAPPDATA:join(fixture,'Local'),CODEX_HOME:join(home,'.codex'),CLAUDE_CONFIG_DIR:join(home,'.claude'),XWX_CLIENT_INSTALLATIONS_TEST_HOME:join(fixture,'installed')};
+  async function session(action){
+    const child=spawn(nativeTestBinary,['--acceptance-rpc','--data-root',app],{env,stdio:['pipe','pipe','pipe'],windowsHide:true});const pending=[];let stderr='';child.stderr.on('data',b=>stderr+=b);child.stdin.on('error',()=>{});
+    createInterface({input:child.stdout}).on('line',line=>{const value=JSON.parse(line),p=pending.shift();if(p){clearTimeout(p.timer);value.ok?p.resolve(value.result):p.reject(Error(value.error));}});
+    const rpc=(method,...args)=>new Promise((resolve,reject)=>{pending.push({resolve,reject,timer:setTimeout(()=>reject(Error('Normal first-home RPC timeout: '+method)),30000)});child.stdin.write(JSON.stringify({method,args})+'\n');});
+    try{return await action(rpc);}finally{child.stdin.end();let timer;const end=await Promise.race([once(child,'exit'),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),10000);})]);clearTimeout(timer);assert.equal(end?.[0],0,stderr.slice(-1000));}
+  }
+  let passed=false;
+  try{
+    await session(async rpc=>{
+      const state=await rpc('getState');assert.ok(state.traceRoot.startsWith(app));
+      assert.deepEqual((await rpc('getProviders')).connections,[]);assert.equal(await access(env.CODEX_HOME).then(()=>true,()=>false),false);
+      await rpc('addModelClient','codex',dirname(cli));await rpc('updateCodexEnhancements',{preserveOfficialLogin:false});
+      assert.equal(await access(env.CODEX_HOME).then(()=>true,()=>false),false,'local preferences do not create an unused external home');
+      await rpc('saveProvider',{id:'normal-first-home',displayName:'First home fixture',baseUrl:'http://127.0.0.1:9/v1',bearerToken:'SYNTHETIC-FIRST-HOME',adapter:'responses',codexModel:'fixture-model'});
+      await rpc('switchClientProvider',{client:'codex',providerId:'normal-first-home'});
+      assert.ok((await readFile(join(env.CODEX_HOME,'config.toml'),'utf8')).includes('127.0.0.1:9'));
+    });
+    await session(async rpc=>{const p=await rpc('getProviders');assert.equal(p.selected.codex,'normal-first-home');assert.equal(p.connections.find(p=>p.id==='normal-first-home').bearerToken,'SYNTHETIC-FIRST-HOME');});
+    await rename(env.CODEX_HOME,env.CODEX_HOME+'-removed');
+    await session(async rpc=>{await assert.rejects(rpc('switchClientProvider',{client:'codex',providerId:'normal-first-home'}),/配置目录已消失/);assert.equal(await access(env.CODEX_HOME).then(()=>true,()=>false),false);assert.equal((await rpc('getProviders')).selected.codex,'normal-first-home');});
+    passed=true;console.log('PASS normal-profile first setup, preference-only save, restart and deleted managed-home protection');
+  }finally{if(passed)await rm(fixture,{recursive:true,force:true,maxRetries:20,retryDelay:100});else console.error('Normal first-home fixture retained: '+fixture);}
+}
+await verifyFirstNormalClientHome();
+
 // Unix inherited file-description leases are exercised with a real official-CLI
 // substitute. Windows handle inheritance still requires its own OS validation.
 if (process.platform === 'win32') {
