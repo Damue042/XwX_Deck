@@ -29,7 +29,7 @@ async function verifyFirstNormalClientHome() {
   try{
     await session(async rpc=>{
       const state=await rpc('getState');assert.ok(state.traceRoot.startsWith(app));
-      assert.deepEqual((await rpc('getProviders')).connections,[]);assert.equal(await access(env.CODEX_HOME).then(()=>true,()=>false),false);
+      const initial=await rpc('getProviders');assert.equal(initial.selected.codex,null);assert.equal(initial.selected.claude,null);assert.equal(await access(env.CODEX_HOME).then(()=>true,()=>false),false);
       await rpc('addModelClient','codex',dirname(cli));await rpc('updateCodexEnhancements',{preserveOfficialLogin:false});
       assert.equal(await access(env.CODEX_HOME).then(()=>true,()=>false),false,'local preferences do not create an unused external home');
       await rpc('saveProvider',{id:'normal-first-home',displayName:'First home fixture',baseUrl:'http://127.0.0.1:9/v1',bearerToken:'SYNTHETIC-FIRST-HOME',adapter:'responses',codexModel:'fixture-model'});
