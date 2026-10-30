@@ -114,7 +114,6 @@ export function AppearanceDrawer({ open, onOpenChange }: Props): React.ReactElem
   }, [bridge.api, bridge.patch, busy]);
 
   const activeSkin = appearance?.skin ?? 'classic';
-  const showThroughput = appearance?.showThroughput === true;
 
   return (
     <>
@@ -227,22 +226,6 @@ export function AppearanceDrawer({ open, onOpenChange }: Props): React.ReactElem
             </div>
           </section>
 
-          <section className="appearance-section modules-section" aria-labelledby="modulesTitle">
-            <h3 id="modulesTitle">{t("页面模块")}</h3>
-            <div className="appearance-row module-row">
-              <span className="appearance-row-copy">
-                <strong>{t("流量图")}</strong>
-              </span>
-              <Toggle
-                id="throughputVisibilityToggle"
-                checked={showThroughput}
-                busy={pendingSaves > 0}
-                ariaLabel={t("显示流量图")}
-                title={showThroughput ? t('隐藏流量图') : t('显示流量图')}
-                onToggle={() => commit({ showThroughput: !showThroughput })}
-              />
-            </div>
-          </section>
         </div>
       </aside>
     </>

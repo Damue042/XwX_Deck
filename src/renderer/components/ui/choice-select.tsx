@@ -1,7 +1,7 @@
 import { t, useLanguage } from '@/lib/i18n';
 import * as React from 'react';
 import { Select } from '@base-ui/react/select';
-import { Check, ChevronsUpDown } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 
 export interface ChoiceItem { readonly id: string; readonly label: React.ReactNode; readonly hint?: string; readonly disabled?: boolean; }
 
@@ -25,7 +25,7 @@ export function ChoiceSelect({ id, label, value, items, selectedLabel, placehold
   const selected = items.find(item => item.id === value);
   return <Select.Root open={open} onOpenChange={next => { setOpen(next); if (next) onOpen?.(); }} actionsRef={actions} value={value} onValueChange={next => { if (next !== null) onChange(next); }} disabled={disabled}>
     <Select.Trigger id={id} className={`xwx-choice-trigger${variant === 'inline' ? ' xwx-choice-inline-trigger' : ''}`} aria-label={label} title={selected?.hint}>
-      <span className="xwx-choice-value">{selectedLabel ?? selected?.label ?? placeholder}</span><Select.Icon className="xwx-choice-icon"><ChevronsUpDown className="size-4" aria-hidden="true" /></Select.Icon>
+      <span className="xwx-choice-value">{selectedLabel ?? selected?.label ?? placeholder}</span><Select.Icon className="xwx-choice-icon"><ChevronDown className="size-4" aria-hidden="true" /></Select.Icon>
     </Select.Trigger>
     <Select.Portal><Select.Positioner className={`xwx-choice-positioner ${menuClassName}${variant === 'inline' ? ' xwx-choice-inline-positioner' : ''}`} side="bottom" align="end" alignOffset={variant === 'inline' ? -9 : 0} sideOffset={variant === 'inline' ? 3 : 4} alignItemWithTrigger={false} collisionPadding={{ top: 41, right: 5, bottom: 5, left: 5 }}>
       <Select.Popup className="xwx-combobox-popup xwx-choice-popup"><Select.List>

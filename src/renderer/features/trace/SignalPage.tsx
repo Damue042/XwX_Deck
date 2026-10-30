@@ -10,7 +10,6 @@ import { isConfiguredModelClient, traceClientLabel } from '../../../shared/clien
 import { Tabs, TabsList, TabsTab } from '@/components/ui/tabs';
 import { useConfirm } from '@/components/ui/confirm-dialog';
 import { ParticleField, emitFieldRipple } from './ParticleField';
-import { ThroughputChart } from './ThroughputChart';
 import { AppearanceButton, AppearanceDrawer, customBackgroundStyle } from './AppearanceDrawer';
 import { ReadoutDigits } from './ReadoutDigits';
 
@@ -132,10 +131,8 @@ export function SignalPage({ active }: Props): React.ReactElement {
     return () => clearTimeout(timer);
   }, [hidden]);
   const clients = (bridge.runtime?.clients ?? []).filter(client => isConfiguredModelClient(bridge.modelClients, client.id));
-  const series = bridge.traceStats?.series ?? [];
   const appearance = bridge.runtime?.traceAppearance;
   const skin = appearance?.skin ?? 'classic';
-  const showThroughput = appearance?.showThroughput === true;
 
   // The idle/live layout belongs to the Trace page, not to the classic
   // particle skin. Keep this global CSS state updated even when clean or
@@ -167,7 +164,7 @@ export function SignalPage({ active }: Props): React.ReactElement {
       return;
     }
     if (!statsTimerRef.current) {
-      // Poll fresh stats every 3s; the chart itself animates smoothly via rAF.
+      // Refresh the Token and cost readout while the Trace page is visible.
       statsTimerRef.current = setInterval(() => { void bridge.refreshStats(); }, 3000);
       void bridge.refreshStats();
     }
@@ -371,7 +368,6 @@ export function SignalPage({ active }: Props): React.ReactElement {
 
           <TokenReadout stats={bridge.traceStats} period={period} />
 
-          {showThroughput ? <ThroughputChart series={series} active={active && capturing} /> : <div className="chart-placeholder" aria-hidden="true" />}
         </div>
 
         <AppearanceDrawer open={appearanceOpen} onOpenChange={setAppearanceOpen} />

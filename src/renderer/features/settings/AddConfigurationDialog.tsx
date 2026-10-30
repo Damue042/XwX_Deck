@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/refresh-button';
+import { DialogCloseButton } from '@/components/ui/dialog-close-button';
 import { t, useLanguage } from '@/lib/i18n';
 import * as React from 'react';
 import { Dialog } from '@base-ui/react/dialog';
 import { Menu } from '@base-ui/react/menu';
-import { ArrowLeft, Ellipsis, FileUp, Plug, Plus, SlidersHorizontal, X } from 'lucide-react';
+import { ArrowLeft, Ellipsis, FileUp, Plug, Plus, SlidersHorizontal } from 'lucide-react';
 import { useBridge } from '@/bridge/store';
 import { groupSubscriptionConnections, subscriptionPlatformForAccount, subscriptionServiceIcon, subscriptionServiceNames } from '@/lib/subscriptionServices';
 import { showErrorToast, showToast } from '@/lib/toast';
@@ -198,8 +199,8 @@ export function AddConfigurationDialog({ open, busy: providerBusy, selected, onO
             <button ref={tab === 'clients' ? initialTabButton : undefined} type="button" role="tab" tabIndex={tab === 'clients' ? 0 : -1} id="configuration-clients-tab" aria-controls="configuration-clients" aria-selected={tab === 'clients'} onClick={() => setTab('clients')} disabled={busy}>{t("客户端管理")}</button>
           </div>}
           <div className="configuration-header-actions">
-            {manageClients && (clientsOnly || tab === 'clients') && <RefreshButton busy={installation.checking} label={installation.checking ? t('正在检测客户端') : t('重新检测')} size={15} disabled={addingClient} onClick={() => void refreshClients()} />}
-            <Dialog.Close ref={clientsOnly || importing ? initialTabButton : undefined} className="configuration-close" aria-label={importing ? t('关闭导入配置') : clientsOnly ? manageClients ? t('关闭管理客户端') : t('关闭添加客户端') : t('关闭添加配置')} disabled={busy || addingClient}><X size={17} aria-hidden="true" /></Dialog.Close>
+            {manageClients && (clientsOnly || tab === 'clients') && <RefreshButton busy={installation.checking} label={installation.checking ? t('正在检测客户端') : t('重新检测')} size={16} disabled={addingClient} onClick={() => void refreshClients()} />}
+            <DialogCloseButton ref={clientsOnly || importing ? initialTabButton : undefined} className="configuration-close" aria-label={importing ? t('关闭导入配置') : clientsOnly ? manageClients ? t('关闭管理客户端') : t('关闭添加客户端') : t('关闭添加配置')} disabled={busy || addingClient} />
           </div>
         </header>
 
