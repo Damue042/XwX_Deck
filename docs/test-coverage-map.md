@@ -225,6 +225,7 @@
 | 脚本 | 执行入口 | 关联编号 |
 | --- | --- | --- |
 | [macos-update-validation-test.mjs](../tools/native/macos-update-validation-test.mjs) | 独立专题入口 | RE03、RE04、RE05 |
+| [nightly-schedule-test.mjs](../tools/native/nightly-schedule-test.mjs) | 独立专题入口 | RE02、RE03、RE04 |
 | [portable-update-test.mjs](../tools/native/portable-update-test.mjs) | 后端默认入口 | RE02、RE03、RE04、RE05 |
 | [public-boundary-test.mjs](../tools/native/public-boundary-test.mjs) | 后端默认入口 | RE01 |
 | [source-fingerprint-test.mjs](../tools/native/source-fingerprint-test.mjs) | 后端默认入口 | RE01、RE02、RE03、RE04 |
@@ -274,6 +275,7 @@
 | --- | --- |
 | [continuation-deepseek-test.mjs](../tools/native/continuation-deepseek-test.mjs) | 后端默认入口 |
 | [managed-adapters-test.mjs](../tools/native/managed-adapters-test.mjs) | 后端默认入口 |
+| [preserve-official-login-test.mjs](../tools/native/preserve-official-login-test.mjs) | 后端默认入口 |
 | [public-binary-boundary-test.mjs](../tools/native/public-binary-boundary-test.mjs) | 后端默认入口 |
 | [reasoning-chat-providers-test.mjs](../tools/native/reasoning-chat-providers-test.mjs) | 后端默认入口 |
 | [trace-compaction-test.mjs](../tools/native/trace-compaction-test.mjs) | 后端默认入口 |

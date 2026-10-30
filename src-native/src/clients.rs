@@ -11,7 +11,11 @@ fn initialize_first_client_home(home: &Path, previously_managed: bool) -> Result
     if previously_managed {
         return Err("客户端配置目录已消失。请先恢复目录，服务选择和恢复记录已保留".into());
     }
-    if !home.is_absolute() || home.components().any(|part| matches!(part, std::path::Component::ParentDir)) {
+    if !home.is_absolute()
+        || home
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
         return Err("客户端配置目录必须是有效绝对路径".into());
     }
     let parent = home.parent().ok_or("客户端配置目录没有有效父目录")?;
@@ -28,7 +32,10 @@ fn initialize_first_client_home(home: &Path, previously_managed: bool) -> Result
     #[cfg(unix)]
     {
         use std::os::unix::fs::DirBuilderExt;
-        fs::DirBuilder::new().mode(0o700).create(home).map_err(err)?;
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(home)
+            .map_err(err)?;
     }
     #[cfg(not(unix))]
     fs::create_dir(home).map_err(err)?;
@@ -1489,7 +1496,12 @@ mod first_client_home_tests {
     use super::*;
     fn root(name: &str) -> PathBuf {
         let base = fs::canonicalize(std::env::temp_dir()).unwrap();
-        let root = base.join(format!("xwx-first-home-{}-{}-{}", std::process::id(), name, millis()));
+        let root = base.join(format!(
+            "xwx-first-home-{}-{}-{}",
+            std::process::id(),
+            name,
+            millis()
+        ));
         fs::create_dir(&root).unwrap();
         root
     }
@@ -1506,7 +1518,10 @@ mod first_client_home_tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
+            assert_eq!(
+                fs::metadata(&home).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
         }
         fs::remove_dir_all(root).unwrap();
     }
