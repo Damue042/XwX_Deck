@@ -556,7 +556,6 @@ pub fn worker() -> Option<i32> {
         }
     }
     let source = crate::argument("--install-setup-update")?;
-    let mut recover_target = None;
     let result = (|| -> Result<Value> {
         let source = PathBuf::from(source);
         let target = PathBuf::from(crate::argument("--replace-executable").ok_or("缺少更新目标")?);
@@ -582,11 +581,20 @@ pub fn worker() -> Option<i32> {
         if other_instance(&target) {
             return Err("旧程序仍运行，未执行 Setup 更新".into());
         }
-        recover_target = Some(target.clone());
         validate(&source, &version)?;
         if hash(&source)? != expected {
             return Err("Setup 安装包已被修改".into());
         }
+        let previous_hash = hash(&target)?;
+        let backup = target.with_extension(format!("exe.previous-{}", &previous_hash[..16]));
+        // Preserve the executable before NSIS removes its temporary rollback files.
+        // Never replace an existing recovery copy or automatically launch an old version.
+        let mut recovery = fs::OpenOptions::new().write(true).create_new(true).open(&backup).map_err(|e| format!("无法保留恢复备份：{e}"))?;
+        let mut previous = fs::File::open(&target).map_err(|e| e.to_string())?;
+        std::io::copy(&mut previous, &mut recovery).map_err(|e| e.to_string())?;
+        recovery.sync_all().map_err(|e| e.to_string())?;
+        drop(recovery);
+        if hash(&backup)? != previous_hash { return Err("恢复备份校验失败".into()); }
         let log = source.with_extension("install.log");
         let output = Command::new(&source)
             .arg("/S")
@@ -608,30 +616,24 @@ pub fn worker() -> Option<i32> {
         {
             return Err("Setup 更新后版本或程序文件不匹配".into());
         }
-        save_result(&json!({"status":"installed","version":version}));
-        let child = restart(&target)?;
+        let backup = target.with_extension(format!("exe.previous-{}", &previous_hash[..16]));
+        if hash(&backup)? != previous_hash {
+            return Err("安装前恢复备份校验失败".into());
+        }
+        let restart_pid = restart(&target)?;
         Ok(
-            json!({"status":"installed","version":version,"restartPid":child.id(),"rebootRequired":false}),
+            json!({"status":"installed","version":version,"restartPid":restart_pid,"rebootRequired":false}),
         )
     })();
-    let mut value = match &result {
+    let value = match &result {
         Ok(v) => v.clone(),
         Err(e) => json!({"status":"error","error":e}),
     };
     save_result(&value);
-    if result.is_err() {
-        if let Some(target) = recover_target.filter(|p| p.is_file() && !other_instance(p)) {
-            match restart(&target) {
-                Ok(child) => value["recoveryPid"] = json!(child.id()),
-                Err(e) => value["recoveryError"] = json!(e),
-            }
-            save_result(&value);
-        }
-    }
     Some(if result.is_ok() { 0 } else { 1 })
 }
 
-fn restart(target: &Path) -> Result<std::process::Child> {
+fn restart(target: &Path) -> Result<u32> {
     let mut command = Command::new(target);
     command.current_dir(target.parent().ok_or("无效安装目录")?);
     if let Some((flag, root)) = launch_root()? {
@@ -648,10 +650,8 @@ fn restart(target: &Path) -> Result<std::process::Child> {
             command.args(["--smoke", "--smoke-setup-restart", "--smoke-exit"]);
         }
     }
-    command
-        .creation_flags(0x08000000)
-        .spawn()
-        .map_err(|e| format!("自动重启失败：{e}"))
+    let helper = std::env::current_exe().map_err(|e| e.to_string())?;
+    crate::portable_update::launch_and_confirm(command, target, helper.parent().ok_or("无效更新目录")?)
 }
 fn launch_root() -> Result<Option<(&'static str, PathBuf)>> {
     for flag in ["--pilot-root", "--data-root"] {

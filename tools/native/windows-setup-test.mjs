@@ -230,16 +230,11 @@ try {
  const helper=join(data,'updates/xwx-setup-update-failure.exe');await copyFile(executable,helper);await standardWindowsArtifact(helper);
  const recoveryLog=await open(join(work,'recovery-startup.log'),'a');
  const child=spawn(helper,['--install-setup-update',installerPath,'--replace-executable',executable,'--expected-sha256','0'.repeat(64),'--expected-version',newVersion,'--parent-pid',String(finishedPid),'--pilot-root',data,'--smoke-setup-restart'],{windowsHide:true,stdio:['ignore',recoveryLog.fd,recoveryLog.fd]});
- assert.equal((await once(child,'exit'))[0],1);const failure=JSON.parse(await readFile(helper.replace(/\.exe$/,'.result.json'),'utf8'));assert.equal(failure.status,'error');assert.ok(failure.recoveryPid);
- try {
-  await wait(async()=>{try{const r=JSON.parse(await readFile(join(data,'native-smoke.json'),'utf8'));assert.ok(r.passed,r.error);return r.stage==='restarted'&&r.version===oldVersion;}catch(e){if(e.code==='ENOENT')return false;throw e;}},'Old app recovery did not render');
- }catch(error){
-  const state=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',`$p=Get-Process -Id ${failure.recoveryPid} -ErrorAction SilentlyContinue; if($p){@{id=$p.Id;handle=$p.MainWindowHandle.ToInt64();title=$p.MainWindowTitle;session=$p.SessionId}|ConvertTo-Json -Compress}`],{encoding:'utf8',windowsHide:true,timeout:30000});
-  await writeFile(join(work,'recovery-diagnostics.json'),JSON.stringify({failure,process:state.stdout,processError:state.stderr,rootFiles:await readdir(data),startup:await readFile(join(work,'recovery-startup.log'),'utf8')},null,2)+'\n');
-  console.error(await readFile(join(work,'recovery-diagnostics.json'),'utf8'));throw error;
- }finally{await recoveryLog.close();}
- await wait(()=>!spawnSync('tasklist.exe',['/FI','PID eq '+failure.recoveryPid,'/FO','CSV','/NH'],{encoding:'utf8',windowsHide:true}).stdout.includes('"'+failure.recoveryPid+'"'),'Recovered test app did not exit');
- pass('detached update helper rejects tampering and renders the unchanged old application again');
+ assert.equal((await once(child,'exit'))[0],1);const failure=JSON.parse(await readFile(helper.replace(/\.exe$/,'.result.json'),'utf8'));assert.equal(failure.status,'error');assert.equal(failure.recoveryPid,undefined);
+ assert.equal(hash(await readFile(executable)),hash(await readFile(oldBinary)));
+ assert.equal(hash(await readFile(join(data,'settings.json'))),settingsBefore);assert.equal(hash(await readFile(traceFile)),traceBefore);
+ await recoveryLog.close();
+ pass('detached helper rejects tampering, preserves the old application and data, and does not silently relaunch a previous version');
  ui=spawn(executable,['--pilot-root',data,'--smoke','--smoke-setup-update','--smoke-setup-restart'],{windowsHide:true,env:{...process.env,XWX_DECK_UPDATE_SERVER_URL:base,XWX_SYSTEM_LANGUAGE_TEST:'zh-CN'},stdio:'ignore'});
  await wait(async()=>{try{const r=JSON.parse(await readFile(join(data,'native-smoke.json'),'utf8'));if(!r.passed)throw Error(r.error);return r.stage==='downloaded';}catch(e){if(e.code==='ENOENT')return false;throw e;}},'Rendered updater did not download');
  await wait(()=>ui.exitCode!==null,'Old app did not exit');assert.equal(ui.exitCode,0);

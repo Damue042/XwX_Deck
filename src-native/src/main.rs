@@ -235,6 +235,11 @@ async fn pilot_rpc(
         return result;
     }
     match method.as_str() {
+        #[cfg(target_os = "windows")]
+        "confirmUpdateStartup" => {
+            portable_update::acknowledge_startup()?;
+            Ok(Value::Null)
+        }
         "inspectStorageMigration" => pilot.lock().await.inspect_storage_migration(),
         "migrateStorage" => {
             let resume = {
@@ -1204,6 +1209,14 @@ async fn pilot_smoke_report(
     )
     .map_err(|e| e.to_string())?;
     if std::env::args().any(|arg| arg == "--smoke-exit") && !pilot.active() {
+        #[cfg(target_os = "windows")]
+        if let Some(directory) = std::env::var_os("XWX_DECK_UPDATE_READY_DIR") {
+            // Keep the test application alive until its real worker observes readiness.
+            for _ in 0..100 {
+                if PathBuf::from(&directory).join("confirmed.json").is_file() { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+        }
         tauri::async_runtime::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_millis(150)).await;
             app.exit(0);

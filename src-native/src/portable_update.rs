@@ -34,6 +34,122 @@ mod windows {
         }
         Ok(())
     }
+    const STARTUP_TIMEOUT: Duration = Duration::from_secs(45);
+    const READY_GRACE: Duration = Duration::from_secs(1);
+
+    fn read_startup_json(path: &Path) -> Result<serde_json::Value, String> {
+        let info = fs::symlink_metadata(path).map_err(|e| e.to_string())?;
+        if !info.is_file() || info.file_type().is_symlink() || info.len() > 8192 {
+            return Err("Invalid startup receipt file".into());
+        }
+        serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?)
+            .map_err(|_| "Invalid startup receipt contents".into())
+    }
+
+    fn startup_directory(path: &Path, nonce: &str) -> Result<(), String> {
+        if nonce.len() != 64 || !nonce.bytes().all(|c| c.is_ascii_hexdigit())
+            || !path.is_absolute()
+            || path.file_name().and_then(|v| v.to_str()) != Some(format!("startup-{nonce}").as_str())
+            || path.parent().and_then(Path::file_name).and_then(|v| v.to_str()) != Some("updates")
+        {
+            return Err("Invalid startup receipt directory".into());
+        }
+        for directory in [path, path.parent().unwrap()] {
+            let info = fs::symlink_metadata(directory).map_err(|e| e.to_string())?;
+            if !info.is_dir() || info.file_type().is_symlink() {
+                return Err("Startup receipt directory must be a regular directory".into());
+            }
+        }
+        Ok(())
+    }
+
+    // Called only through the main window's IPC after React commits a usable
+    // shell and receives the native runtime state. Spawn success is insufficient.
+    pub fn acknowledge_startup() -> Result<(), String> {
+        let directory = std::env::var_os("XWX_DECK_UPDATE_READY_DIR");
+        let nonce = std::env::var("XWX_DECK_UPDATE_READY_NONCE").ok();
+        let (directory, nonce) = match (directory, nonce) {
+            (None, None) => return Ok(()),
+            (Some(directory), Some(nonce)) => (PathBuf::from(directory), nonce),
+            _ => return Err("Incomplete update startup challenge".into()),
+        };
+        startup_directory(&directory, &nonce)?;
+        let challenge = read_startup_json(&directory.join("challenge.json"))?;
+        let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+        let requested = PathBuf::from(challenge["executable"].as_str().ok_or("Missing startup executable")?);
+        let actual = fs::canonicalize(&executable).map_err(|e| e.to_string())?;
+        let requested = fs::canonicalize(requested).map_err(|e| e.to_string())?;
+        let actual_hash = hash(&executable)?;
+        if challenge["nonce"] != nonce
+            || !actual.to_string_lossy().eq_ignore_ascii_case(&requested.to_string_lossy())
+            || challenge["sha256"] != actual_hash
+        {
+            return Err("Update startup challenge does not match this application".into());
+        }
+        let receipt = serde_json::json!({"nonce":nonce,"pid":std::process::id(),"sha256":actual_hash});
+        let ready = directory.join("ready.json");
+        if ready.exists() {
+            return if read_startup_json(&ready)? == receipt { Ok(()) }
+                else { Err("A different application already acknowledged startup".into()) };
+        }
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new().write(true).create_new(true)
+            .open(directory.join("ready.tmp")).map_err(|e| e.to_string())?;
+        file.write_all(receipt.to_string().as_bytes()).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        drop(file);
+        fs::rename(directory.join("ready.tmp"), ready).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn launch_and_confirm(mut command: Command, target: &Path, updates: &Path) -> Result<u32, String> {
+        regular(target)?;
+        let target = fs::canonicalize(target).map_err(|e| e.to_string())?;
+        let updates = fs::canonicalize(updates).map_err(|e| e.to_string())?;
+        let mut random = [0u8; 32];
+        getrandom::fill(&mut random).map_err(|e| e.to_string())?;
+        let nonce: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let directory = updates.join(format!("startup-{nonce}"));
+        fs::create_dir(&directory).map_err(|e| e.to_string())?;
+        startup_directory(&directory, &nonce)?;
+        let expected = hash(&target)?;
+        let challenge = serde_json::json!({"nonce":nonce,"executable":target,"sha256":expected});
+        fs::write(directory.join("challenge.json"), challenge.to_string()).map_err(|e| e.to_string())?;
+        let mut child = command.env("XWX_DECK_UPDATE_READY_DIR", &directory)
+            .env("XWX_DECK_UPDATE_READY_NONCE", &nonce)
+            .env("XWX_DECK_UPDATE_EXPECTED_SHA256", &expected)
+            .creation_flags(0x08000000).spawn().map_err(|e| format!("自动启动失败：{e}"))?;
+        let started = std::time::Instant::now();
+        let mut acknowledged = None;
+        loop {
+            if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+                return Err(format!("新版启动未完成，进程已退出（{status}）。新文件与恢复备份均保留，请手动检查。"));
+            }
+            let ready = directory.join("ready.json");
+            if ready.exists() {
+                let receipt = read_startup_json(&ready)?;
+                if receipt["nonce"] != nonce || receipt["pid"].as_u64() != Some(u64::from(child.id()))
+                    || receipt["sha256"] != expected
+                {
+                    return Err("新版启动确认不匹配。新文件与恢复备份均保留，请手动检查。".into());
+                }
+                if acknowledged.is_none() && hash(&target)? != expected {
+                    return Err("新版文件在启动期间发生变化，已保留恢复备份。".into());
+                }
+                let at = acknowledged.get_or_insert_with(std::time::Instant::now);
+                if at.elapsed() >= READY_GRACE {
+                    if hash(&target)? != expected { return Err("启动确认后的文件校验失败，已保留恢复备份。".into()); }
+                    fs::write(directory.join("confirmed.json"), receipt.to_string()).map_err(|e| e.to_string())?;
+                    return Ok(child.id());
+                }
+            }
+            if started.elapsed() >= STARTUP_TIMEOUT {
+                return Err("等待新版就绪超时。新程序可能仍在运行，新文件与恢复备份均保留，请手动检查。".into());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     pub fn spawn(source: &Path) -> Result<(), String> {
         regular(source)?;
         let target = std::env::current_exe().map_err(|e| e.to_string())?;
@@ -46,7 +162,8 @@ mod windows {
             .unwrap()
             .join(format!("xwx-native-update-{}.exe", std::process::id()));
         fs::copy(&target, &helper).map_err(|e| e.to_string())?;
-        Command::new(&helper)
+        let mut command = Command::new(&helper);
+        command
             .args(["--install-update"])
             .arg(source)
             .arg("--replace-executable")
@@ -54,8 +171,15 @@ mod windows {
             .arg("--expected-sha256")
             .arg(hash(source)?)
             .arg("--parent-pid")
-            .arg(std::process::id().to_string())
-            .creation_flags(0x08000000)
+            .arg(std::process::id().to_string());
+        let args: Vec<_> = std::env::args().collect();
+        for flag in ["--pilot-root", "--data-root"] {
+            if let Some(value) = args.windows(2).find(|pair| pair[0] == flag) {
+                let root = fs::canonicalize(&value[1]).map_err(|e| e.to_string())?;
+                command.arg(flag).arg(root);
+            }
+        }
+        command.creation_flags(0x08000000)
             .spawn()
             .map_err(|e| e.to_string())?;
         Ok(())
@@ -163,17 +287,18 @@ mod windows {
                 fs::rename(&backup, &target).map_err(|e| e.to_string())?;
                 return Err(e);
             }
-            Command::new(&target)
-                .current_dir(target.parent().unwrap())
-                .creation_flags(0x08000000)
-                .spawn()
-                .map_err(|_| {
-                    format!(
-                        "新版已替换但自动启动失败，请手动打开 {}；恢复备份已保留在 {}",
-                        target.display(),
-                        backup.display()
-                    )
-                })?;
+            let mut command = Command::new(&target);
+            command.current_dir(target.parent().unwrap());
+            for flag in ["--pilot-root", "--data-root"] {
+                if let Some(value) = args.windows(2).find(|pair| pair[0] == flag) {
+                    let root = fs::canonicalize(&value[1]).map_err(|e| e.to_string())?;
+                    if flag == "--pilot-root" && fs::read_to_string(root.join(".xwx-rust-pilot")).ok().as_deref() != Some("isolated-rust-pilot-v1\n") {
+                        return Err("隔离数据目录无效".into());
+                    }
+                    command.arg(flag).arg(root);
+                }
+            }
+            launch_and_confirm(command, &target, source.parent().unwrap()).map_err(|error| format!("{error} 恢复备份：{}", backup.display()))?;
             Ok(())
         })();
         if let Err(error) = result {
@@ -187,4 +312,4 @@ mod windows {
     }
 }
 #[cfg(target_os = "windows")]
-pub use windows::{idle_for_nightly, spawn, worker};
+pub use windows::{acknowledge_startup, idle_for_nightly, launch_and_confirm, spawn, worker};
