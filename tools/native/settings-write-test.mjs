@@ -94,6 +94,10 @@ try {
   assert.equal(reverted.restored, true);
   assert.equal((await app.rpc('getState')).theme, 'night');
   assert.ok((await readdir(join(root, 'backups'))).some(name => name.startsWith('settings-before-restore-')));
+  // Restored settings intentionally have no connection. Trace requires an
+  // explicitly selected client route under the current empty-install contract.
+  await app.rpc('saveProvider', { id: 'backup-guard', displayName: 'Backup guard fixture', baseUrl: 'http://127.0.0.1:9/v1', bearerToken: 'synthetic-only', adapter: 'responses', codexModel: 'synthetic-model' });
+  await app.rpc('switchClientProvider', { client: 'codex', providerId: 'backup-guard' });
   await app.rpc('toggleTracing', true);
   assert.ok((await app.rpc('getBackupHistory')).every(row => !row.canRestore));
   await assert.rejects(app.rpc('restoreBackup', current), /先停止 Trace/);

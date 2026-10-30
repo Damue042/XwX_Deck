@@ -150,11 +150,11 @@ try {
   assert.equal(requests.at(-1).body.text?.verbosity,undefined,'a native client template cannot prove relay verbosity support');
   declaredSearch=true;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   const searchArgs=[...codexArgs.slice(0,-1),'-c','web_search="live"',codexArgs.at(-1)];
-  assert.ok((await runCli(codex,searchArgs)).stdout.includes(answer));assert.ok(!requests.at(-1).body.tools.some(t=>t.type==='web_search'||t.type==='web_search_preview'),'unverified relay search controls remain disabled');
+  assert.ok((await runCli(codex,searchArgs)).stdout.includes(answer));assert.ok(requests.at(-1).body.tools.some(t=>t.type==='web_search'||t.type==='web_search_preview'),'the explicit CLI search choice remains authoritative');
   declaredSearch=false;declaredVerbosity=false;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   assert.ok((await runCli(codex,codexArgs)).stdout.includes(answer));assert.ok(!requests.at(-1).body.text?.verbosity);
   declaredVerbosity=true;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
-  pass('installed Codex completes requests while unverified relay search and verbosity remain disabled across refreshes');
+  pass('installed Codex omits unverified verbosity while an explicit CLI search choice remains authoritative');
 
   const image = join(workspace, 'fixture.png');
   const pngChunk = (type, data) => { const bytes = Buffer.concat([Buffer.from(type), data]), length = Buffer.alloc(4), checksum = Buffer.alloc(4); length.writeUInt32BE(data.length); checksum.writeUInt32BE(crc32(bytes)); return Buffer.concat([length, bytes, checksum]); };
