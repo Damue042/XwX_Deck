@@ -79,20 +79,6 @@
       "arch": "arm64",
       "publishedArtifactName": "XwX-Deck-mac-arm64.dmg",
       "unsignedFallback": "manual-dmg"
-    },
-    "macosX64": {
-      "buildScript": "build:mac:x64",
-      "artifactName": "XwX-Deck-mac-x64.dmg",
-      "distribution": "developer-id-notarized-dmg",
-      "developerId": true,
-      "notarized": true,
-      "installMode": "automatic",
-      "updateMetadata": "release.json",
-      "automaticInstall": true,
-      "platform": "darwin",
-      "arch": "x64",
-      "publishedArtifactName": "XwX-Deck-mac-x64.dmg",
-      "unsignedFallback": "manual-dmg"
     }
   },
   "openSource": {
@@ -104,7 +90,7 @@
     "ci": ".github/workflows/ci.yml",
     "pages": ".github/workflows/pages.yml",
     "release": ".github/workflows/release.yml",
-    "releaseMode": "draft"
+    "releaseMode": "artifact-staging"
   },
   "providerFramework": {
     "presets": [
@@ -177,5 +163,31 @@
     "webview": "system",
     "bundledNode": false,
     "bundledChromium": false
-  }
+  },
+  "futurePlatforms": {
+    "macosX64": {
+      "buildScript": "build:mac:x64",
+      "artifactName": "XwX-Deck-mac-x64.dmg",
+      "distribution": "developer-id-notarized-dmg",
+      "developerId": true,
+      "notarized": true,
+      "installMode": "automatic",
+      "updateMetadata": "release.json",
+      "automaticInstall": true,
+      "platform": "darwin",
+      "arch": "x64",
+      "publishedArtifactName": "XwX-Deck-mac-x64.dmg",
+      "unsignedFallback": "manual-dmg"
+    }
+  },
+  "releaseTargets": [
+    {
+      "platform": "windows",
+      "arch": "x64"
+    },
+    {
+      "platform": "darwin",
+      "arch": "arm64"
+    }
+  ]
 }

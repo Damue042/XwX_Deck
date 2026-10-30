@@ -5,7 +5,7 @@ import {verifyEnvelope} from '../release/update-signature.mjs';
 if(process.platform!=='darwin') {
   console.log('SKIP macOS Security/CryptoKit signing adapter on this platform; no Keychain access attempted');
 } else {
-  const names=[['windows','x64','installer','XwX-Deck-windows-x64-setup.exe'],['windows','x64','portable','XwX-Deck-windows-x64.exe'],['darwin','arm64','disk-image','XwX-Deck-mac-arm64.dmg'],['darwin','x64','disk-image','XwX-Deck-mac-x64.dmg']];
+  const names=[['windows','x64','installer','XwX-Deck-windows-x64-setup.exe'],['windows','x64','portable','XwX-Deck-windows-x64.exe'],['darwin','arm64','disk-image','XwX-Deck-mac-arm64.dmg']];
   const manifest={schemaVersion:1,channel:'release',releaseSeries:'native-v1',version:'1.0.0',tag:'v1.0.0',files:names.map(([platform,arch,kind,name])=>({platform,arch,kind,name,url:'https://download.xwxdeck.com/releases/v1.0.0/'+name,size:1,sha256:'a'.repeat(64)}))};
   // This explicit helper mode generates an ephemeral in-memory fixture key.
   // It neither queries nor writes Keychain, and never uses production trust.

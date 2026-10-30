@@ -7,7 +7,8 @@ GitHub 用于维护公开源码和代码审查。
 ## 候选来源
 
 每个候选记录提交、源码指纹和制品 SHA-256。
-Windows、Apple Silicon 与 Intel 使用同一份公共源码。
+本次发布范围为 Windows x64 和 Apple Silicon Mac。
+Intel 底层能力和历史证据保留，不属于本次发行。
 各平台结果分别登记。
 旧包结果不改绑到新候选。
 
@@ -25,8 +26,8 @@ Windows、Apple Silicon 与 Intel 使用同一份公共源码。
 不覆盖已发布的同版本制品。
 
 本轮源码已采用固定域名及独立签名校验。
-仓库原有 Release workflow 仍包含 GitHub 草稿上传步骤。
-两处都必须在正式发布前调整并验证。
+Release workflow 只暂存候选文件，不创建或上传 GitHub 下载发行版。
+正式签名、域名分发和稳定清单激活单独验收。
 不通过旧标签流程发布本轮候选。
 
 ## 验收要求
@@ -36,7 +37,7 @@ Windows 分别验收安装版和便携版。
 坏包、断流、签名错误及启动失败均需实测。
 夜间更新还需核对空闲状态和安全停机。
 
-Mac 分别验收两种架构。
+Mac 本轮只验收 Apple Silicon 架构。
 正式制品完成 Developer ID 签名、公证和票据装订。
 客户端使用已批准的发布公钥校验更新。
 私钥保持在既有安全存储中。
@@ -48,8 +49,9 @@ Mac 分别验收两种架构。
 
 ## Mac 隔离验收
 
-生产构建使用 `build:mac:arm64:production` 或 `build:mac:x64:production`。
-这两个入口使用默认 Rust features，不启用人工验收功能。
+本次生产构建使用 `build:mac:arm64:production`。
+该入口使用默认 Rust features，不启用人工验收功能。
+保留的 x64 入口仅供未来恢复，不作为本次发布条件。
 未完成的 `productionReady` 门禁仍会阻止生产构建。
 
 需要先核对生产代码时，使用对应架构的 `:candidate` 入口。

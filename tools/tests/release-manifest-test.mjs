@@ -12,8 +12,7 @@ const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'
 const targets = [
   ['XwX-Deck-windows-x64-setup.exe', 'windows', 'x64'],
   ['XwX-Deck-windows-x64.exe', 'windows', 'x64'],
-  ['XwX-Deck-mac-arm64.dmg', 'darwin', 'arm64'],
-  ['XwX-Deck-mac-x64.dmg', 'darwin', 'x64']
+  ['XwX-Deck-mac-arm64.dmg', 'darwin', 'arm64']
 ];
 const temporary = await mkdtemp(join(tmpdir(), 'deck-release-manifest-'));
 function generate(directory, tag = `v${version}`) {
@@ -66,5 +65,5 @@ try {
     assert.ok(failure.stderr.includes(`Missing release artifact: ${missing}`));
     for (const name of ['release-unsigned.json', 'latest.yml', 'checksums.txt']) await assert.rejects(access(join(directory, name)));
   }
-  console.log('PASS release manifest: three architectures, Setup/portable separation, immutable URLs, hashes, notes, unrelated cwd and missing-artifact rejection (synthetic payloads)');
+  console.log('PASS release manifest: Windows x64 and Apple Silicon; three artifacts, Setup/portable separation, immutable URLs, hashes, notes, unrelated cwd and missing-artifact rejection (synthetic payloads)');
 } finally { await rm(temporary, { recursive: true, force: true }); }

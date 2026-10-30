@@ -146,8 +146,8 @@ fn validate_candidate_feed(manifest: &Value, feed: &reqwest::Url, isolated: bool
         return Err("候选更新仅限对应来源的显式隔离目录".into());
     }
     let files = manifest["files"].as_array().ok_or("候选制品列表无效")?;
-    if files.len() != 4 {
-        return Err("候选制品必须覆盖四个发行身份".into());
+    if files.len() != 3 {
+        return Err("候选制品必须覆盖当前三个发行身份".into());
     }
     let mut seen = std::collections::HashSet::new();
     for file in files {
@@ -159,7 +159,6 @@ fn validate_candidate_feed(manifest: &Value, feed: &reqwest::Url, isolated: bool
             ("windows", "x64", "installer") => "XwX-Deck-windows-x64-setup.exe",
             ("windows", "x64", "portable") => "XwX-Deck-windows-x64.exe",
             ("darwin", "arm64", "disk-image") => "XwX-Deck-mac-arm64.dmg",
-            ("darwin", "x64", "disk-image") => "XwX-Deck-mac-x64.dmg",
             _ => return Err("候选制品身份无效".into()),
         };
         if text(file, "name") != name
@@ -199,7 +198,6 @@ mod signing_tests {
             ),
             ("windows", "x64", "portable", "XwX-Deck-windows-x64.exe"),
             ("darwin", "arm64", "disk-image", "XwX-Deck-mac-arm64.dmg"),
-            ("darwin", "x64", "disk-image", "XwX-Deck-mac-x64.dmg"),
         ];
         let manifest = json!({"candidate":{"schemaVersion":1,"commit":commit,"only":true,"sourceFingerprint":"b".repeat(64)},
             "files":names.iter().map(|(platform,arch,kind,name)|json!({"platform":platform,"arch":arch,"kind":kind,"name":name,"url":format!("{base}/{name}")})).collect::<Vec<_>>()});
@@ -219,6 +217,14 @@ mod signing_tests {
         assert!(validate_candidate_feed(&altered, &feed, true).is_err());
         altered = manifest.clone();
         altered["files"][1] = altered["files"][0].clone();
+        assert!(validate_candidate_feed(&altered, &feed, true).is_err());
+        for missing in 0..3 {
+            let mut incomplete = manifest.clone();
+            incomplete["files"].as_array_mut().unwrap().remove(missing);
+            assert!(validate_candidate_feed(&incomplete, &feed, true).is_err());
+        }
+        altered = manifest.clone();
+        altered["files"][2] = json!({"platform":"darwin","arch":"x64","kind":"disk-image","name":"XwX-Deck-mac-x64.dmg","url":format!("{base}/XwX-Deck-mac-x64.dmg")});
         assert!(validate_candidate_feed(&altered, &feed, true).is_err());
     }
 

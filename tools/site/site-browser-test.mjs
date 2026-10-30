@@ -44,7 +44,7 @@ const server = createServer(async (request, response) => {
     let body = await readFile(file);
     if (configured && relative === 'index.html') {
       const original = body.toString();
-      const replacement = original.replace(/const DOWNLOADS = \{[^}]+\};/, "const DOWNLOADS = { windows: '/fixture.exe?platform=windows', mac: '/fixture.exe?platform=mac', macIntel: '/fixture.exe?platform=macIntel' };");
+      const replacement = original.replace(/const DOWNLOADS = \{[^}]+\};/, "const DOWNLOADS = { windows: '/fixture.exe?platform=windows', mac: '/fixture.exe?platform=mac', portable: '/fixture.exe?platform=portable' };");
       assert.notEqual(replacement, original, 'configured-download fixture must replace the actual download map');
       body = Buffer.from(replacement);
     }
@@ -92,7 +92,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     const primary = page.locator('#recommended-download');
     await primary.getByText('查看发布状态').waitFor();
-    assert.equal(await primary.getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+    assert.equal(await primary.getAttribute('href'), '#download-choices');
     const primaryBox = await primary.boundingBox();
     const otherBox = await page.locator('#download-options > summary').boundingBox();
     const sameRow = Math.abs(primaryBox.y - otherBox.y) < 1;
@@ -103,13 +103,11 @@ try {
     assert.ok(groupLeft >= 0 && groupRight <= width && (sameRow || otherBox.y >= primaryBox.y + primaryBox.height), 'download group stays within the viewport and preserves action order');
     assert.equal(await page.locator('#download-caption').count(), 0);
     await page.locator('#download-options > summary').click();
-    for (const target of ['windows', 'mac', 'macIntel']) assert.equal(await page.locator(`[data-download="${target}"]`).isVisible(), true);
+    for (const target of ['windows', 'portable', 'mac']) assert.equal(await page.locator(`[data-download="${target}"]`).isVisible(), true);
     assert.equal(await page.locator('.download-choices .download-choice').count(), 3);
-    const intel = page.locator('[data-download="macIntel"]');
-    assert.equal(await intel.getAttribute('href'), null);
-    assert.equal(await intel.getAttribute('aria-disabled'), 'true');
-    assert.match(await intel.innerText(), /Intel[\s\S]*暂不可用/);
-    assert.equal(await page.locator('.dl-msg').innerText(), 'Windows 安装包尚未发布。macOS 暂不可用。');
+    assert.equal(await page.locator('[data-download="macIntel"]').count(), 0);
+    assert.equal(await page.locator('[data-download="portable"]').getAttribute('href'), null);
+    assert.equal(await page.locator('.dl-msg').innerText(), 'Windows 和 Apple Silicon Mac 安装包尚未发布。');
     assert.equal(await page.locator('[data-unavailable-download]').count(), 0);
     assert.equal(await page.locator('.recommend-badge').count(), 0);
     assert.doesNotMatch(await page.locator('.download-choices').innerText(), /推荐|↗/);
@@ -184,10 +182,11 @@ try {
     assert.match(await page.locator('#demo-progress').innerText(), /Manage API services and subscription accounts/);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.match(await page.locator('#recommended-download').innerText(), /View release status/);
-    assert.equal(await page.locator('#recommended-download').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
-    assert.equal(await page.locator('.dl-msg').innerText(), 'The Windows installer has not been released. macOS is unavailable.');
+    assert.equal(await page.locator('#recommended-download').getAttribute('href'), '#download-choices');
+    assert.equal(await page.locator('.dl-msg').innerText(), 'Windows and Apple Silicon Mac downloads have not been published.');
     await page.locator('#download-options > summary').click();
-    assert.equal(await page.getByRole('link', { name: 'All releases', exact: true }).isVisible(), true);
+    assert.equal(await page.getByRole('link', { name: 'All releases', exact: true }).count(), 0);
+    assert.equal(await page.getByText('Windows portable', {exact:true}).isVisible(), true);
     const downloadBox = await page.locator('.download-choices').boundingBox();
     assert.ok(downloadBox.x >= 0 && downloadBox.x + downloadBox.width <= width);
     await picker.click();
@@ -249,8 +248,8 @@ try {
   await blockedStorage.close();
   checks.push('WE01/WE03: bilingual copy, download links, live previews, 4 responsive widths, persistence, browser-language override, keyboard/focus, outside dismissal and unavailable storage');
   assert.equal(await page.locator('a[href*="/releases/latest/download/"]').count(), 0, 'unpublished assets are never represented as working downloads');
-  assert.equal(await page.locator('[data-download="windows"]').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
-  for (const platform of ['mac', 'macIntel']) {
+  assert.equal(await page.locator('[data-download="windows"]').getAttribute('href'), null);
+  for (const platform of ['mac', 'portable']) {
     const choice = page.locator(`[data-download="${platform}"]`);
     assert.equal(await choice.getAttribute('href'), null);
     assert.equal(await choice.getAttribute('aria-disabled'), 'true');
@@ -262,7 +261,7 @@ try {
   assert.equal(await page.locator('.community-copy').innerText(), '欢迎交流使用体验');
   assert.match(await page.locator('body').evaluate(el => getComputedStyle(el).fontFamily), /xVf.*Noto Sans SC/);
   assert.equal(await page.evaluate(async () => { await document.fonts.load('400 16px xVf'); await document.fonts.load('500 16px xVf'); return document.fonts.check('400 16px xVf') && document.fonts.check('500 16px xVf'); }), true, 'both website font weights load from the copied resource');
-  checks.push('WE02: unpublished Windows links open the new release page; both Mac architectures are unavailable; no broken asset links are exposed');
+  checks.push('WE02: unpublished artifacts have no live links; Windows installer/portable and Apple Silicon choices remain truthful; Intel is not offered');
   await page.goto(url + '/configured/index.html', { waitUntil: 'networkidle' });
   const download = page.waitForEvent('download');
   await page.locator('#recommended-download').click();
@@ -271,7 +270,7 @@ try {
   // Exercise browser-reported architectures and conservative fallbacks in real DOMs.
   const profiles = [
     { name: 'Apple Silicon', platform: 'macOS', arch: 'arm', direct: 'mac' },
-    { name: 'Intel Mac', platform: 'macOS', arch: 'x86', direct: 'macIntel' },
+    { name: 'Intel Mac', platform: 'macOS', arch: 'x86', context: '本次不提供 Intel Mac 安装包。' },
     { name: 'Windows x64', platform: 'Windows', arch: 'x86', direct: 'windows' },
     { name: 'Windows ARM64', platform: 'Windows', arch: 'arm', context: '当前提供 Windows x64 下载，尚无原生 ARM64 版。' },
     { name: 'Windows 32-bit', platform: 'Windows', arch: 'x86', bitness: '32' },
@@ -320,8 +319,8 @@ try {
       assert.match(await candidate.locator('.chip-help p').innerText(), /关于本机/);
       await candidate.locator('#download-options > summary').click();
     }
-    assert.equal(await candidate.locator('a.download-choice[data-download="macIntel"][href]').count(), 1);
-    assert.equal(await candidate.locator('.download-history').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+    assert.equal(await candidate.locator('[data-download="macIntel"]').count(), 0);
+    assert.equal(await candidate.locator('.download-history').count(), 0);
     await context.close();
   }
   for (const interaction of ['pointer', 'keyboard', 'timeout']) {
@@ -348,12 +347,11 @@ try {
   await fallback.locator('#download-options > summary').click();
   assert.equal(await fallback.locator('[data-download="windows"]').isVisible(), true);
   assert.equal(await fallback.locator('[data-download="mac"]').isVisible(), true);
-  assert.equal(await fallback.locator('[data-download="macIntel"]').isVisible(), true);
-  assert.equal(await fallback.locator('#recommended-download').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
-  assert.equal(await fallback.locator('[data-download="windows"]').getAttribute('href'), 'https://github.com/Damue042/XwX_Deck/releases');
+  assert.equal(await fallback.locator('[data-download="macIntel"]').count(), 0);
+  assert.equal(await fallback.locator('#recommended-download').getAttribute('href'), '#download-choices');
+  assert.equal(await fallback.locator('[data-download="windows"]').getAttribute('href'), null);
   assert.equal(await fallback.locator('[data-download="mac"]').getAttribute('href'), null);
-  assert.equal(await fallback.locator('[data-download="macIntel"]').getAttribute('href'), null);
-  assert.equal(await fallback.locator('.dl-msg').innerText(), 'Windows 安装包尚未发布。macOS 暂不可用。');
+  assert.equal(await fallback.locator('.dl-msg').innerText(), 'Windows 和 Apple Silicon Mac 安装包尚未发布。');
   await noScript.close();
   checks.push('WE02: 11 OS/architecture profiles, mobile and iPad, missing/denied hints, pointer/keyboard choice preservation, timeout, Escape/outside dismissal and truthful no-JavaScript release status');
   for (const width of [390, 1440]) {

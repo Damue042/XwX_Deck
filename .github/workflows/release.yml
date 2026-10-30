@@ -12,7 +12,6 @@ on:
           - all
           - windows-x64
           - macos-arm64
-          - macos-x64
       verify_build_run_id:
         description: Verify official Windows clients against an existing successful package run
         required: false
@@ -30,7 +29,7 @@ on:
     tags:
       - "v*.*.*"
 permissions:
-  contents: write
+  contents: read
   id-token: write
   attestations: write
 
@@ -222,7 +221,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.target == 'macos-arm64' && '[{"os":"macos-15","arch":"arm64"}]' || inputs.target == 'macos-x64' && '[{"os":"macos-15-intel","arch":"x64"}]' || '[{"os":"macos-15","arch":"arm64"},{"os":"macos-15-intel","arch":"x64"}]') }}
+        include:
+          - os: macos-15
+            arch: arm64
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -318,7 +319,7 @@ jobs:
 
   release-draft:
     if: github.event_name == 'push'
-    name: Assemble draft release
+    name: Assemble distribution candidate
     needs:
       - validate
       - windows
@@ -365,24 +366,9 @@ jobs:
         with:
           subject-path: release-assets/*
 
-      - name: Create or update draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.validate.outputs.tag }}
-          VERSION: ${{ needs.validate.outputs.version }}
-        shell: bash
-        run: |
-          if gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null | grep -qx true; then
-            gh release upload "$TAG" release-assets/* --clobber
-          elif gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists and is not a draft." >&2
-            exit 1
-          else
-            gh release create "$TAG" \
-              --draft \
-              --generate-notes \
-              --title "XwX Deck $VERSION" \
-              --notes-file release-assets/release-notes.md \
-              release-assets/*
-          fi
-          echo "Draft release is ready. Review platform packages before publishing it in GitHub."
+      - name: Save candidate distribution files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-distribution-candidate
+          path: release-assets/*
+          if-no-files-found: error

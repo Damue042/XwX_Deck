@@ -41,7 +41,7 @@ for (const file of required) failures.push(`missing required workflow: ${file}`)
 
 const release = await readFile(path.join(workflowRoot, 'release.yml'), 'utf8');
 check(release.includes('environment: release'), 'release workflow must use the protected release environment');
-check(release.includes('--draft'), 'release workflow must create a draft release');
+check(release.includes('name: release-distribution-candidate') && !/gh release (create|upload)\b/.test(release), 'GitHub must stage candidate artifacts without publishing download releases');
 check(release.includes('attest-build-provenance'), 'release workflow must attest build provenance');
 check(release.includes('macos-15'), 'release workflow must build on a native macOS arm64 runner');
 check(release.includes('windows-latest'), 'release workflow must build on a native Windows runner');
@@ -53,23 +53,18 @@ const releaseWorkflow = parse(release);
 check(Object.hasOwn(releaseWorkflow.on, 'workflow_dispatch'), 'candidate builds require manual dispatch');
 const targetInput = releaseWorkflow.on.workflow_dispatch?.inputs?.target;
 check(targetInput?.type === 'choice' && targetInput.required === true && targetInput.default === 'all'
-  && JSON.stringify(targetInput.options) === JSON.stringify(['all', 'windows-x64', 'macos-arm64', 'macos-x64']),
-  'candidate builds must default to all three packages and allow individual targets');
+  && JSON.stringify(targetInput.options) === JSON.stringify(['all', 'windows-x64', 'macos-arm64']),
+  'candidate builds must default to all supported packages and allow individual targets');
 check(releaseWorkflow.jobs.windows?.if === "github.event_name == 'push' || inputs.target == 'all' || inputs.target == 'windows-x64'",
   'Windows candidates must run for all or windows-x64 selections and release tags');
 check(releaseWorkflow.jobs.macos?.if === "github.event_name == 'push' || inputs.target != 'windows-x64'",
   'Windows-only candidates must skip Mac builds');
 check(releaseWorkflow.jobs['release-draft']?.if === "github.event_name == 'push'",
   'manual candidates must not assemble or publish a release');
-const matrix = releaseWorkflow.jobs.macos?.strategy?.matrix?.include ?? '';
-const armMatrix = JSON.stringify([{os:'macos-15', arch:'arm64'}]);
-const intelMatrix = JSON.stringify([{os:'macos-15-intel', arch:'x64'}]);
-const allMacMatrix = JSON.stringify([{os:'macos-15', arch:'arm64'}, {os:'macos-15-intel', arch:'x64'}]);
-check(matrix === `\${{ fromJSON(inputs.target == 'macos-arm64' && '${armMatrix}' || inputs.target == 'macos-x64' && '${intelMatrix}' || '${allMacMatrix}') }}`,
-  'Mac candidates must select the requested native architecture; all packages and release tags must build both');
+check(JSON.stringify(releaseWorkflow.jobs.macos?.strategy?.matrix?.include) === JSON.stringify([{os:'macos-15',arch:'arm64'}]), 'current Mac candidates must build Apple Silicon only');
 check(releaseWorkflow.jobs['release-draft'].needs.includes('macos'), 'draft assembly must wait for all Mac candidates');
 const ciWorkflow = parse(await readFile(path.join(workflowRoot, 'ci.yml'), 'utf8'));
-check(ciWorkflow.jobs['platform-compile'].strategy.matrix.os.includes('macos-15-intel'), 'CI must validate native Intel Mac');
+check(JSON.stringify(ciWorkflow.jobs['platform-compile'].strategy.matrix.os)===JSON.stringify(['windows-latest','macos-15']), 'current CI must validate Windows x64 and Apple Silicon');
 for (const [name, workflow] of [['ci', ciWorkflow], ['release', releaseWorkflow]]) {
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps ?? []) if (step.uses?.startsWith('actions/cache/restore@')) {
@@ -82,7 +77,7 @@ const published = await readFile(path.join(workflowRoot, 'verify-release.yml'), 
 check(published.includes('tools/native/published-artifact-test.mjs') && !published.includes('build-update-baseline'),
   'published verification must exercise downloaded native artifacts rather than an Electron-only baseline');
 
-check(parse(published).jobs.verify.strategy.matrix.os.includes('macos-15-intel'), 'published verification must include Intel Mac');
+check(JSON.stringify(parse(published).jobs.verify.strategy.matrix.os)===JSON.stringify(['windows-latest','macos-15']), 'published verification must match current Windows and Apple Silicon scope');
 
 const pages = await readFile(path.join(workflowRoot, 'pages.yml'), 'utf8');
 check(pages.includes('deploy-pages'), 'Pages workflow must deploy with actions/deploy-pages');
@@ -94,7 +89,7 @@ if (failures.length) {
   for (const failure of failures) console.error(`- ${failure}`);
   process.exit(1);
 }
-console.log('PASS GitHub workflows: CI, Pages and draft release framework');
+console.log('PASS GitHub workflows: CI, Pages and distribution staging framework');
 
 function check(condition, message) {
   if (!condition) failures.push(message);

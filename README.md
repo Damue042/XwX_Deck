@@ -10,8 +10,12 @@
   <a href="https://xwxdeck.com">官网</a>&nbsp;&nbsp;&nbsp;
   <a href="https://xwxdeck.com/docs/">文档</a>&nbsp;&nbsp;&nbsp;
   <a href="https://xwxdeck.com/?demo=dashboard#experience">在线体验</a>&nbsp;&nbsp;&nbsp;
-  <a href="https://github.com/Damue042/XwX_Deck/releases/latest">下载</a>
+  <a href="https://xwxdeck.com/#download">下载</a>
 </p>
+
+本次发行范围为 Windows x64 和 Apple Silicon Mac。
+暂不提供 Intel Mac 安装包。
+具体文件与验收边界见[发布平台范围](docs/maintenance/release-platform-scope-20261030.md)。
 
 [![XwX Deck 仪表盘：请求、Token、费用与耗时](assets/github/trace-preview.png)](https://xwxdeck.com/?demo=dashboard#experience)
 

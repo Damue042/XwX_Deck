@@ -16,7 +16,7 @@ async function digest(stream) {
 export async function validateCandidatePackages({directory,manifest,acceptance,candidateId}) {
   validateManifest(manifest,{candidateId});
   if (acceptance?.passed !== true || acceptance.candidateOnly !== true || acceptance.commit !== candidateId
-      || acceptance.sourceFingerprint !== manifest.candidate.sourceFingerprint || acceptance.files?.length !== 4) {
+      || acceptance.sourceFingerprint !== manifest.candidate.sourceFingerprint || acceptance.files?.length !== 3) {
     throw Error('Exact candidate-package acceptance is required');
   }
   const root = await realpath(directory), packages = [];

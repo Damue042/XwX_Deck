@@ -12,8 +12,8 @@ guard input.count <= 1024*1024,
       let version=manifest["version"] as? String,
       version.range(of:"^[0-9]+\\.[0-9]+\\.[0-9]+$",options:.regularExpression) != nil,
       manifest["tag"] as? String == "v"+version,
-      let files=manifest["files"] as? [[String:Any]],files.count==4 else {stop("Invalid release manifest; Keychain not accessed")}
-let names=["windows/x64/installer":"XwX-Deck-windows-x64-setup.exe","windows/x64/portable":"XwX-Deck-windows-x64.exe","darwin/arm64/disk-image":"XwX-Deck-mac-arm64.dmg","darwin/x64/disk-image":"XwX-Deck-mac-x64.dmg"]
+      let files=manifest["files"] as? [[String:Any]],files.count==3 else {stop("Invalid release manifest; Keychain not accessed")}
+let names=["windows/x64/installer":"XwX-Deck-windows-x64-setup.exe","windows/x64/portable":"XwX-Deck-windows-x64.exe","darwin/arm64/disk-image":"XwX-Deck-mac-arm64.dmg"]
 let arguments=Array(CommandLine.arguments.dropFirst())
 let selfTest:Bool
 let candidateId:String?

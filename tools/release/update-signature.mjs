@@ -3,7 +3,7 @@ import { createPublicKey, sign, verify } from 'node:crypto';
 export function validateManifest(manifest, {candidateId} = {}) {
   if (manifest.schemaVersion !== 1 || manifest.channel !== 'release' || manifest.releaseSeries !== 'native-v1'
       || !/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.tag !== `v${manifest.version}`
-      || !Array.isArray(manifest.files) || manifest.files.length !== 4) throw Error('Invalid release manifest');
+      || !Array.isArray(manifest.files) || manifest.files.length !== 3) throw Error('Invalid release manifest');
   const candidate = candidateId !== undefined;
   if (candidate) {
     if (!/^[a-f0-9]{40}$/.test(candidateId) || manifest.candidate?.schemaVersion !== 1
@@ -18,8 +18,7 @@ export function validateManifest(manifest, {candidateId} = {}) {
     const names = {
       'windows/x64/installer': 'XwX-Deck-windows-x64-setup.exe',
       'windows/x64/portable': 'XwX-Deck-windows-x64.exe',
-      'darwin/arm64/disk-image': 'XwX-Deck-mac-arm64.dmg',
-      'darwin/x64/disk-image': 'XwX-Deck-mac-x64.dmg'
+      'darwin/arm64/disk-image': 'XwX-Deck-mac-arm64.dmg'
     };
     if (identities.has(identity) || names[identity] !== file.name
         || file.url !== `${base}/${file.name}`
