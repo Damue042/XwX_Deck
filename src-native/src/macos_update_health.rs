@@ -413,6 +413,11 @@ mod tests {
     fn kernel_process_check_detects_current_executable() {
         assert!(executable_in_use(&std::env::current_exe().unwrap()).unwrap());
     }
+    // These real-kernel fixtures hash the large debug test executable.
+    // Serialize that I/O so competing fixtures cannot spend the wire deadline
+    // before their first frame; production deadlines and rejection checks stay exact.
+    static HEALTH_FIXTURE_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn monitor() -> Monitor {
         let executable = std::env::current_exe().unwrap();
         Monitor::create(
@@ -424,6 +429,7 @@ mod tests {
     }
     #[test]
     fn real_unix_peer_acknowledges_start_and_ready_without_marker_files() {
+        let _fixture = HEALTH_FIXTURE_SERIAL.lock().unwrap();
         let mut server = monitor();
         let path = server.path().to_path_buf();
         let exe = std::env::current_exe().unwrap();
@@ -438,6 +444,7 @@ mod tests {
     }
     #[test]
     fn forged_pid_version_challenge_and_ready_phase_never_grant_data_access() {
+        let _fixture = HEALTH_FIXTURE_SERIAL.lock().unwrap();
         for field in ["pid", "version", "challenge", "phase"] {
             let mut server = monitor();
             let path = server.path().to_path_buf();
@@ -464,6 +471,7 @@ mod tests {
     }
     #[test]
     fn stale_file_and_wrong_executable_cannot_acknowledge_current_task() {
+        let _fixture = HEALTH_FIXTURE_SERIAL.lock().unwrap();
         let mut server = monitor();
         fs::write(
             server.path.parent().unwrap().join("old-ready.json"),
@@ -489,6 +497,7 @@ mod tests {
     }
     #[test]
     fn disconnect_after_grant_keeps_data_phase_uncertain_and_never_reports_ready() {
+        let _fixture = HEALTH_FIXTURE_SERIAL.lock().unwrap();
         let mut server = monitor();
         let path = server.path().to_path_buf();
         let exe = std::env::current_exe().unwrap();
@@ -502,6 +511,7 @@ mod tests {
     }
     #[test]
     fn incorrect_helper_identity_and_target_version_fail_before_client_data_phase() {
+        let _fixture = HEALTH_FIXTURE_SERIAL.lock().unwrap();
         for wrong_server in [true, false] {
             let mut server = monitor();
             let path = server.path().to_path_buf();
