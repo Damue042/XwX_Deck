@@ -11,11 +11,12 @@ import {nativeTestBinary} from './test-support.mjs';
 const root=await mkdtemp(join(tmpdir(),'xwx-nightly-clock-'));
 const payload=Buffer.from('isolated update fixture, never executed'.repeat(4096));
 const sha=createHash('sha256').update(payload).digest('hex');
-let fixture,base;const held=[];
+let fixture,base;const held=[],heldFeeds=[];
 const server=createServer(async(req,res)=>{
  if(req.url==='/release.json'){
   fixture.feeds++;res.writeHead(fixture.offline?503:200,{'content-type':'application/json'});
-  res.end(JSON.stringify(fixture.offline?{}:{schemaVersion:1,channel:'release',releaseSeries:'native-v1',version:fixture.version,tag:'v'+fixture.version,publishedAt:'2026-10-30T00:00:00Z',files:[{platform:'windows',arch:'x64',kind:'portable',name:'fixture.exe',url:base+'/artifact.exe',size:payload.length,sha256:fixture.badHash?'0'.repeat(64):sha}]}));return;
+  const body=JSON.stringify(fixture.offline?{}:{schemaVersion:1,channel:'release',releaseSeries:'native-v1',version:fixture.version,tag:'v'+fixture.version,publishedAt:'2026-10-30T00:00:00Z',files:[{platform:'windows',arch:'x64',kind:'portable',name:'fixture.exe',url:base+'/artifact.exe',size:payload.length,sha256:fixture.badHash?'0'.repeat(64):sha}]});
+  if(fixture.holdFeed){heldFeeds.push(()=>res.end(body));return;}res.end(body);return;
  }
  if(req.url==='/artifact.exe'){fixture.artifacts++;res.end(payload);return;}
  if(req.url==='/v1/responses'){
@@ -42,7 +43,7 @@ async function scenario(name,run){
  const blocked=async()=>{await delay(400);assert.equal(fixture.artifacts,0);assert.equal((await handoffs(dir)).length,0);};
  const plan=async()=>{await wait(async()=>(await handoffs(dir)).length===1,'scheduled update handoff');assert.equal(fixture.artifacts,1);const e=(await handoffs(dir))[0];assert.equal(e.handoff.targetVersion,fixture.version);assert.equal(e.handoff.status,'ready');};
  try{await run({dir,get app(){return app;},setClock,discover,blocked,plan,current,nextVersion,restart:async()=>{await app.stop();app=startNativeRpc(dir,['--test-nightly-clock',file]);await app.rpc('getUpdateState');}});checks.push(name);console.log('PASS nightly '+name);}
- finally{for(const res of held.splice(0))res.end('event: response.completed\ndata: {"type":"response.completed","response":{"id":"done","status":"completed","output":[]}}\n\n');await app.stop();}
+ finally{for(const finish of heldFeeds.splice(0))finish();for(const res of held.splice(0))res.end('event: response.completed\ndata: {"type":"response.completed","response":{"id":"done","status":"completed","output":[]}}\n\n');await app.stop();}
 }
 try{
  await scenario('startup-delay-and-02-hour-boundary',async t=>{await t.setClock({elapsedMs:5999,hour:2,idleMs:900000});await delay(400);assert.equal(fixture.feeds,0);await t.discover({hour:1,idleMs:900000});await t.blocked();await t.setClock({hour:2});await t.plan();});
@@ -55,6 +56,7 @@ try{
  await scenario('periodic-refresh-after-up-to-date',async t=>{fixture.version=t.current;await t.discover({hour:2,idleMs:900000});await wait(async()=>(await t.app.rpc('getUpdateState')).status==='up-to-date','initial current version');const count=fixture.feeds;t.nextVersion();await t.setClock({elapsedMs:1805999});await delay(400);assert.equal(fixture.feeds,count);await t.setClock({elapsedMs:1806000});await t.plan();});
  await scenario('periodic-recovery-after-network-failure',async t=>{fixture.offline=true;await t.discover({hour:2,idleMs:900000});await wait(async()=>(await t.app.rpc('getUpdateState')).status==='error','network error');await t.blocked();fixture.offline=false;await t.setClock({elapsedMs:1806000});await t.plan();});
  await scenario('bad-checksum-never-hands-off',async t=>{fixture.badHash=true;await t.discover({hour:2,idleMs:900000});await wait(async()=>(await t.app.rpc('getUpdateState')).status==='error','checksum rejection');assert.equal((await handoffs(t.dir)).length,0);assert.equal(fixture.artifacts,1);});
+ await scenario('cancelled-check-does-not-commit-a-late-manifest',async t=>{fixture.holdFeed=true;await t.discover({hour:2,idleMs:900000});await wait(async()=>(await t.app.rpc('getUpdateState')).status==='checking','held check');await t.app.rpc('cancelUpdate');const choice=await t.app.rpc('getUpdateState');fixture.holdFeed=false;for(const finish of heldFeeds.splice(0))finish();await delay(500);assert.deepEqual(await t.app.rpc('getUpdateState'),choice);await t.blocked();});
  const missing=spawnSync(nativeTestBinary,['--rpc','--test-nightly-clock',join(root,'outside.json')],{encoding:'utf8',windowsHide:true});assert.equal(missing.status,2);checks.push('clock-hook-cannot-run-without-isolated-root');
  const result={passed:true,checks,root,binarySha256:createHash('sha256').update(await readFile(nativeTestBinary)).digest('hex'),systemClockChanged:false,foregroundUsed:false,scope:'Production scheduling function runs on an isolated RPC timer with controlled elapsed time, local hour and idle duration. Actual installer execution is replaced only at the isolated test handoff; physical replacement and main-window readiness are covered separately.'};
  await writeFile(join(root,'summary.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

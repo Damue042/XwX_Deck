@@ -109,7 +109,7 @@ impl WindowsUpdateSchedule {
         if due && !["downloading", "ready", "checking"].contains(&state["status"].as_str().unwrap_or("")) {
             self.last_check_ms = Some(elapsed_ms);
             let updates = shared.lock().await.updates_context();
-            let _ = updates.check().await;
+            let _ = updates.check_background().await;
         }
         if !night_idle { return None; }
         let mut pilot = shared.lock().await;

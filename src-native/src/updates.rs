@@ -136,20 +136,27 @@ impl Updates {
     async fn manifest(&self) -> Result<Value> {
         source::manifest(&self.root).await
     }
-    pub async fn check(&self) -> Result<Value> {
-        {
-            let mut inner = self.inner.lock().unwrap();
-            if inner.installing {
-                return Ok(inner.state.clone());
-            }
-            if inner.state["status"] == "downloading" {
-                return Ok(inner.state.clone());
-            }
+    fn begin_check(&self, background: bool) -> Option<u64> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.installing || inner.state["status"] == "downloading"
+            || (background && [Some("ready"), Some("checking")].contains(&inner.state["status"].as_str()))
+        { return None; }
+        inner.generation += 1;
+        // A background read must not prevent an explicit download of an
+        // already offered version. Its generation will then supersede this read.
+        if !background || inner.state["status"] != "available" {
             inner.state["status"] = json!("checking");
         }
+        Some(inner.generation)
+    }
+    pub async fn check(&self) -> Result<Value> { self.check_inner(false).await }
+    #[cfg(target_os = "windows")]
+    pub async fn check_background(&self) -> Result<Value> { self.check_inner(true).await }
+    async fn check_inner(&self, background: bool) -> Result<Value> {
+        let Some(generation) = self.begin_check(background) else { return Ok(self.state()); };
         let fetched = self.manifest().await;
         let mut inner = self.inner.lock().unwrap();
-        if inner.installing {
+        if inner.installing || inner.generation != generation {
             return Ok(inner.state.clone());
         }
         let manifest = match fetched {
@@ -412,5 +419,38 @@ impl Updates {
             crate::windows_setup::validate(&path, text(&selected, "version"))?;
         }
         Ok(path)
+    }
+}
+
+#[cfg(test)]
+mod update_check_tests {
+    use super::*;
+    fn fixture() -> Updates { Updates::new(std::env::temp_dir().join(format!("update-check-fixture-{}", std::process::id()))) }
+    #[test]
+    fn background_check_keeps_ready_downloading_and_inflight_selection() {
+        for status in ["ready", "downloading", "checking"] {
+            let updates = fixture();
+            let before = json!({"status":status,"targetVersion":"9.8.7","downloadPath":"keep-current-selection"});
+            { let mut inner=updates.inner.lock().unwrap();inner.state=before.clone();inner.generation=7; }
+            assert!(updates.begin_check(true).is_none());
+            assert_eq!(updates.state(), before);
+            assert_eq!(updates.inner.lock().unwrap().generation,7);
+        }
+    }
+    #[test]
+    fn background_check_leaves_available_version_downloadable() {
+        let updates=fixture();
+        updates.inner.lock().unwrap().state=json!({"status":"available","targetVersion":"9.8.7"});
+        assert!(updates.begin_check(true).is_some());
+        assert_eq!(updates.state()["status"],"available");
+    }
+    #[test]
+    fn newer_explicit_check_supersedes_the_previous_generation() {
+        let updates=fixture();
+        let first=updates.begin_check(false).unwrap();
+        let second=updates.begin_check(false).unwrap();
+        assert!(second>first);
+        assert_ne!(updates.inner.lock().unwrap().generation,first);
+        assert_eq!(updates.inner.lock().unwrap().generation,second);
     }
 }
