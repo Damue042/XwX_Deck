@@ -233,6 +233,7 @@
 | [update-test.mjs](../tools/native/update-test.mjs) | 后端默认入口 | RE02、RE03、RE04、RE05 |
 | [windows-setup-test.mjs](../tools/native/windows-setup-test.mjs) | 独立专题入口 | RE02、RE03、RE05 |
 | [windows-setup-ui-test.mjs](../tools/native/windows-setup-ui-test.mjs) | 独立专题入口 | RE05 |
+| [candidate-release-test.mjs](../tools/tests/candidate-release-test.mjs) | test:built 入口 | RE02 |
 | [keychain-signing-test.mjs](../tools/tests/keychain-signing-test.mjs) | test:built 入口 | RE02 |
 | [release-manifest-test.mjs](../tools/tests/release-manifest-test.mjs) | test:built 入口 | RE02 |
 
