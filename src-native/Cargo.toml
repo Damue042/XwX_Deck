@@ -63,3 +63,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Hash large debug fixtures without consuming the protocol's bounded read time.
+# This override retains debug assertions and does not affect release builds.
+[profile.test.package.sha2]
+opt-level = 3
