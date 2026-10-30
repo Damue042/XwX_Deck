@@ -2977,7 +2977,7 @@ impl Pilot {
                 self.settings.other.insert(format!("{client}PreferredMode"),json!(if selected.is_null(){"official"}else{"compatible"}));
                 self.settings.selected[client] = selected;
                 self.persist()?;
-                if self.settings.selected[client].is_string() {
+                if self.settings.selected[client].is_string() && matches!(client, "codex" | "claude") {
                     self.prepare_first_client_home(client)?;
                 }
                 if client=="codex" {self.prepare_native_auth().await?;}

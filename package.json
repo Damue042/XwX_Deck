@@ -12,6 +12,7 @@
   },
   "scripts": {
     "clean": "rimraf dist",
+    "precompile": "node tools/build/prepare-base-ui-toast.mjs",
     "compile": "npm run check-types && npm run check:docs && npm run check:icons && npm run check:release-contract && npm run check:runtime-boundary && npm run check:shared-parity && node tools/build/esbuild.config.mjs && npm run check:repository",
     "check-types": "tsc --noEmit",
     "check:quality": "node tools/checks/check-quality.mjs",
