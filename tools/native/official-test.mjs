@@ -138,6 +138,7 @@ try {
 
  // API takeover must clear the same root override as official takeover.
  // Then reproduce a mixed configuration left by the earlier API branch.
+ await call('updateCodexEnhancements',{preserveOfficialLogin:false});
  const oldRoot='http://127.0.0.1:9';
  const apiTakeoverSource=stale.replace('keep="external"',`openai_base_url="${oldRoot}"\nkeep="external"`);
  await writeFile(config,apiTakeoverSource);
