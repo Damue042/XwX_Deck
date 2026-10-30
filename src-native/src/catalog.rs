@@ -50,6 +50,25 @@ fn ensure_codex_instructions(row: &mut Value) {
     }
     row["base_instructions"] = json!("You are a coding agent. Follow the user instructions, use the provided tools carefully, and report the completed result clearly.");
 }
+// Native caches can contain partial rows. Complete structural client fields
+// without replacing native policies or claiming service capabilities.
+fn complete_codex_structure(row: &mut Value) {
+    for (key, value) in json!({
+        "shell_type":"shell_command",
+        "apply_patch_tool_type":"freeform",
+        "truncation_policy":{"mode":"tokens","limit":10000},
+        "experimental_supported_tools":[],
+        "supported_reasoning_levels":[]
+    })
+    .as_object()
+    .unwrap()
+    {
+        if row.get(key).is_none() {
+            row[key] = value.clone();
+        }
+    }
+    ensure_codex_instructions(row);
+}
 const REASONING_LEVELS: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 // DeepSeek's Responses contract exposes none/low/high/max. models.dev records
 // the effort tiers but models the thinking toggle separately, so Codex needs
@@ -762,7 +781,7 @@ impl Catalog {
             if row.get("supports_parallel_tool_calls").is_none() {
                 row["supports_parallel_tool_calls"] = json!(false);
             }
-            ensure_codex_instructions(&mut row);
+            complete_codex_structure(&mut row);
             row
         }).collect::<Vec<_>>();
         let path = self.codex_home.join(crate::edition::config::CATALOG_FILE);
@@ -1150,6 +1169,25 @@ mod client_contract_tests {
         let mut absent = json!({"slug":"codex-auto-review"});
         ensure_codex_instructions(&mut absent);
         assert!(absent["base_instructions"].is_string());
+    }
+    #[test]
+    fn partial_native_rows_keep_policies_and_receive_required_structure() {
+        let mut row = json!({"slug":"fixture","shell_type":"disabled","experimental_supported_tools":["native-tool"],"model_messages":{"instructions_template":"native template"}});
+        complete_codex_structure(&mut row);
+        assert_eq!(row["shell_type"], "disabled");
+        assert_eq!(row["experimental_supported_tools"], json!(["native-tool"]));
+        assert_eq!(
+            row["model_messages"]["instructions_template"],
+            "native template"
+        );
+        assert!(row.get("base_instructions").is_none());
+        assert_eq!(row["truncation_policy"]["mode"], "tokens");
+        assert_eq!(row["supported_reasoning_levels"], json!([]));
+        let mut partial = json!({"slug":"partial","context_window":32768});
+        complete_codex_structure(&mut partial);
+        assert_eq!(partial["shell_type"], "shell_command");
+        assert_eq!(partial["context_window"], 32768);
+        assert!(partial["base_instructions"].is_string());
     }
     #[test]
     fn official_protocols_survive_an_empty_openai_directory() {
