@@ -48,6 +48,18 @@ Mac 分别验收两种架构。
 
 ## Mac 隔离验收
 
+生产构建使用 `build:mac:arm64:production` 或 `build:mac:x64:production`。
+这两个入口使用默认 Rust features，不启用人工验收功能。
+未完成的 `productionReady` 门禁仍会阻止生产构建。
+
+需要先核对生产代码时，使用对应架构的 `:candidate` 入口。
+它从干净提交生成普通身份的签名候选。
+候选不启用 `manual-acceptance` 或 `update-validation`。
+构建报告记录 `production-candidate` 和实际请求的 features。
+该模式不改变 readiness，也不执行安装或发布。
+readiness 尚未通过时，只能用明确的隔离数据根启动候选。
+普通用户目录的启动限制保留。
+
 Mac 签名与恢复机制已在早期独立候选实测。
 当前归并候选必须重新构建和验收。
 旧包结论不改绑，详见 [签名更新隔离验收](mac-signed-update-validation.md)。

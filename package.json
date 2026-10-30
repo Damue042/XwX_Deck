@@ -71,12 +71,17 @@
     "test:site": "node tools/site/site-browser-test.mjs",
     "test:docs": "node tools/site/docs-browser-test.mjs",
     "check:repository": "node tools/checks/check-repository-boundary.mjs",
-    "test:release-manifest": "node tools/tests/release-manifest-test.mjs && node tools/tests/cloudflare-update-test.mjs && node tools/native/update-health-renderer-test.mjs && node tools/tests/keychain-signing-test.mjs",
+    "test:release-manifest": "node tools/tests/release-manifest-test.mjs && node tools/tests/cloudflare-update-test.mjs && node tools/tests/candidate-release-test.mjs && node tools/native/update-health-renderer-test.mjs && node tools/tests/keychain-signing-test.mjs",
     "test:folder-window-cleanup": "node tools/native/windows-folder-windows-test.mjs",
     "check:shared-parity": "node tools/shared-core/audit-parity.mjs --quiet",
     "sync:core": "node tools/shared-core/sync.mjs",
     "test:shared-parity": "node tools/shared-core/parity-test.mjs",
-    "release:cloudflare": "node tools/release/cloudflare-publisher.mjs"
+    "release:cloudflare": "node tools/release/cloudflare-publisher.mjs",
+    "build:mac:arm64:production": "npm run compile && node tools/native/build.mjs --signed --require-platform=darwin --require-arch=arm64",
+    "build:mac:arm64:candidate": "npm run compile && node tools/native/build.mjs --production-candidate --signed --require-platform=darwin --require-arch=arm64",
+    "build:mac:x64:production": "npm run compile && node tools/native/build.mjs --signed --require-platform=darwin --require-arch=x64",
+    "build:mac:x64:candidate": "npm run compile && node tools/native/build.mjs --production-candidate --signed --require-platform=darwin --require-arch=x64",
+    "release:cloudflare:candidate": "node tools/release/candidate-release.mjs"
   },
   "devDependencies": {
     "@base-ui/react": "^1.6.0",

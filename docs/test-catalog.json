@@ -1546,7 +1546,8 @@
           "tools/tests/release-manifest-test.mjs",
           "tools/native/windows-setup-test.mjs",
           "tools/native/nightly-schedule-test.mjs",
-          "tools/tests/keychain-signing-test.mjs"
+          "tools/tests/keychain-signing-test.mjs",
+          "tools/tests/candidate-release-test.mjs"
         ],
         "mappingStatus": "entry-points-only",
         "gap": "脚本验证工程合同。真实授权、账单与物理操作分别补验。"

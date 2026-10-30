@@ -15,5 +15,14 @@ if(process.platform!=='darwin') {
   assert.throws(()=>verifyEnvelope({...result.envelope,payload:Buffer.from('{}').toString('base64')},{keys:[{id:'ephemeral-fixture',publicKey:result.publicKey}]}),/signature/);
   assert.throws(()=>verifyEnvelope(result.envelope,{keys:[]}),/Untrusted/);
   await assert.rejects(signWithKeychain({...manifest,releaseSeries:'unrelated'},{keys:[]}),/Invalid release manifest/);
+  const candidateId='a'.repeat(40);
+  const candidate={...manifest,candidate:{schemaVersion:1,only:true,commit:candidateId,sourceFingerprint:'b'.repeat(64)},files:manifest.files.map(file=>({...file,url:'https://download.xwxdeck.com/candidates/'+candidateId+'/'+file.name}))};
+  await assert.rejects(signWithKeychain(candidate,{keys:[]}),/not a production release/);
+  const staged=await signWithKeychain(candidate,{keys:[]},{selfTest:true,candidateId});
+  const candidateTrust={keys:[{id:'ephemeral-fixture',publicKey:staged.publicKey}]};
+  assert.deepEqual(verifyEnvelope(staged.envelope,candidateTrust,{candidateId}),candidate);
+  assert.throws(()=>verifyEnvelope(staged.envelope,candidateTrust),/not a production release/);
+  assert.throws(()=>verifyEnvelope(staged.envelope,candidateTrust,{candidateId:'c'.repeat(40)}),/candidate identity/);
+  await assert.rejects(signWithKeychain({...candidate,files:candidate.files.map(file=>({...file,url:file.url.replace('/candidates/','/updates/stable/')}))},{keys:[]},{selfTest:true,candidateId}),/Invalid release artifact/);
   console.log('PASS actual Swift/CryptoKit signer interoperates with Node Ed25519 verification; tamper/unknown trust rejected; invalid input rejected before Keychain; ephemeral fixture only, production access not tested');
 }

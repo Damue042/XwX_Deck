@@ -18,7 +18,7 @@ const installations=join(root,'installations');
 const defaultBuildReport = process.platform === 'darwin' ? 'test-results/rust-pilot-package/native-build-report.json' : 'test-results/native-package/native-build-report.json';
 const build = JSON.parse(await readFile(resolve(process.env.XWX_NATIVE_TEST_BUILD_REPORT ?? defaultBuildReport),'utf8'));
 let binary = resolve(process.env.XWX_NATIVE_TEST_BINARY ?? build.candidate.binary);
-const provenance = await verifyCandidate({root:resolve('.'),report:build,binary,allowManualAcceptance:Boolean(process.env.XWX_NATIVE_TEST_BINARY && process.env.XWX_NATIVE_TEST_BUILD_REPORT)});
+const provenance = await verifyCandidate({root:resolve('.'),report:build,binary,allowManualAcceptance:Boolean(process.env.XWX_NATIVE_TEST_BINARY && process.env.XWX_NATIVE_TEST_BUILD_REPORT),allowProductionCandidate:Boolean(process.env.XWX_NATIVE_TEST_BINARY && process.env.XWX_NATIVE_TEST_BUILD_REPORT)});
 const binarySha256=createHash('sha256').update(await readFile(binary)).digest('hex');
 // The application selects updates for its own architecture, including Rosetta.
 let candidateArch=process.arch;

@@ -21,28 +21,31 @@ const requiredArch = process.argv.find(a=>a.startsWith("--require-arch="))?.spli
 if (requiredArch && process.arch !== requiredArch) throw new Error(`Build requires a native ${requiredArch} host.`);
 const isolated = process.argv.includes('--pilot');
 const acceptance = process.argv.includes('--acceptance');
+const productionCandidate = process.argv.includes('--production-candidate');
 const skipTests = process.argv.includes('--skip-tests');
 const signed = process.argv.includes('--signed');
 const updateValidation = process.argv.includes('--update-validation');
+if(productionCandidate && (!['darwin','win32'].includes(process.platform)||(process.platform==='darwin'&&!signed)||isolated||acceptance||updateValidation||skipTests))throw Error('Production candidates require native Windows or signed macOS builds with production features and all build checks.');
 if(updateValidation && !(isolated && signed && process.platform==='darwin'))throw Error('Update validation requires --pilot --signed on macOS');
 const automaticMacUpdate = editionBuild.automaticMacUpdate || updateValidation;
 if (signed && process.platform !== 'darwin') throw Error('--signed requires macOS.');
 if (isolated && acceptance) throw Error('隔离验证和正常安装验收是不同的构建模式，不能同时启用。');
 const readiness=JSON.parse(await readFile(resolve(pilot,'../../src-native/migration-status.json'),'utf8'));
-if (!isolated && !acceptance && !readiness.productionReady) throw new Error('XwXDeck 原生迁移尚未完整验收。正式构建被阻止；用户人工验收使用 build:native:acceptance，自动化隔离验证使用 build:native:isolated。缺口：'+readiness.blockers.join('；'));
+if (!isolated && !acceptance && !productionCandidate && !readiness.productionReady) throw new Error('XwXDeck 原生迁移尚未完整验收。正式构建被阻止；用户人工验收使用 build:native:acceptance，自动化隔离验证使用 build:native:isolated。缺口：'+readiness.blockers.join('；'));
 const productName = isolated ? 'XwXDeck Rust Validation' : 'XwX Deck';
 const appId = isolated ? 'app.xwxdeck.validation' : 'app.xwxdeck.desktop';
 const root = resolve(pilot, '../..');
 const initialSource = await sourceFingerprint(root);
 const initialGit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
 if (initialGit.status !== 0) throw Error('无法确定原生构建来源提交。');
-if (acceptance) {
+if (acceptance || productionCandidate) {
   const status = spawnSync('git', ['status', '--porcelain=v1'], { cwd: root, encoding: 'utf8' });
   if (status.status !== 0 || status.stdout.trim()) throw Error('正常安装验收包必须从干净提交构建，请先保存当前修改。');
 }
-const buildMode = isolated ? 'isolated' : acceptance ? 'manual-acceptance' : 'production';
+const buildMode = isolated ? 'isolated' : acceptance ? 'manual-acceptance' : productionCandidate ? 'production-candidate' : 'production';
 const scope = isolated ? 'Isolated validation candidate; production gate remains closed.' : acceptance
   ? 'User-requested installable manual acceptance candidate; normal application identity and data; real-environment acceptance remains pending.'
+  : productionCandidate ? 'Production-feature candidate; platform trust is recorded separately; readiness remains unchanged; launch only with an isolated root until all release gates pass.'
   : 'Native release candidate after migration acceptance.';
 const packageJson=JSON.parse(await readFile(resolve(root,'package.json'),'utf8'));
 const version=updateValidation?process.argv.find(a=>a.startsWith('--validation-version='))?.slice(21):packageJson.version;
@@ -75,8 +78,10 @@ const editMenuSource=await readFile(resolve(root,'src/shared/edit-context-menu.b
 await writeFile(resolve(root,'test-results/native-frontend/licenses.html'),renderLicenseDocument(notices,licenseTexts).replace('</body>','<script>'+editMenuSource+'</script></body>'));
 const embeddedFrontendSha256 = await directoryFingerprint(resolve(root, 'test-results/native-frontend'));
 const embeddedAssetsSha256 = await directoryFingerprint(resolve(root, 'test-results/native-assets'));
-run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.nativeBinary, ...(updateValidation ? ['--features','update-validation'] : acceptance ? ['--features', 'manual-acceptance'] : []), '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
-if (signed && automaticMacUpdate) run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.helperBinary, ...(updateValidation ? ['--features','update-validation'] : acceptance ? ['--features', 'manual-acceptance'] : []), '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
+const cargoRequestedFeatures=updateValidation?['update-validation']:acceptance?['manual-acceptance']:[];
+const cargoFeatureArgs=cargoRequestedFeatures.length?['--features',cargoRequestedFeatures.join(',')]:[];
+run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.nativeBinary, ...cargoFeatureArgs, '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
+if (signed && automaticMacUpdate) run(cargo, ['build', '--locked', '--release', '--bin', editionBuild.helperBinary, ...cargoFeatureArgs, '--manifest-path', resolve(root, 'src-native/Cargo.toml')]);
 await assertEditionArtifact(resolve(env.CARGO_TARGET_DIR,'release',editionBuild.nativeBinary+(process.platform==='win32'?'.exe':'')),root);
 if (embeddedFrontendSha256 !== await directoryFingerprint(resolve(root, 'test-results/native-frontend')) || embeddedAssetsSha256 !== await directoryFingerprint(resolve(root, 'test-results/native-assets'))) throw Error('原生编译期间嵌入资源发生变化，未登记候选；请重新构建。');
 if (process.platform !== 'darwin') {
@@ -102,12 +107,13 @@ if (process.platform !== 'darwin') {
     });
     if (signature.status !== 0) throw Error('无法核对 Windows 候选签名。');
     const report = {
+      platform: process.platform, arch: process.arch,
       version, branch: branch.stdout.trim(), commit: commit.stdout.trim(), dirty: Boolean(status.stdout.trim()), worktree: status.stdout.trim(),
       buildTime: new Date().toISOString(), sourceFingerprint: finalSource.sha256, sourceFileCount: finalSource.fileCount,
       embeddedFrontendSha256, embeddedAssetsSha256,
       candidate: { binary: destination, binaryBytes: bytes.length, binarySha256: createHash('sha256').update(bytes).digest('hex'), architecture: 'x86_64', bundleId: appId,
         signature: signature.stdout.trim(), integrityLabel: 'medium', externalRuntime: 'Microsoft Edge WebView2 (system installed)' },
-      installer, sizeBudget: checkNativeArtifactSize({exeBytes:bytes.length}), buildMode, testsSkipped: skipTests, productionReady: readiness.productionReady, installed: false, published: false, scope
+      installer, sizeBudget: checkNativeArtifactSize({exeBytes:bytes.length}), buildMode, validationOnly:updateValidation, candidateOnly:productionCandidate, cargoRequestedFeatures, cargoDefaultFeatures:true, testsSkipped: skipTests, productionReady: readiness.productionReady, installed: false, published: false, scope
     };
     await writeFile(resolve(destination, '..', 'native-build-report.json'), JSON.stringify(report, null, 2) + '\n');
     await writeFile(destination + '.sha256', report.candidate.binarySha256 + '  XwX Deck.exe\n');
@@ -206,7 +212,7 @@ if(existsSync(baselineDmg)){
 const git=inspect('git',['rev-parse','HEAD']);const branch=inspect('git',['branch','--show-current']);const worktree=inspect('git',['status','--porcelain=v1']);
 const finalSource = await sourceFingerprint(root);
 if (initialSource.sha256 !== finalSource.sha256 || initialGit.stdout.trim() !== git.output) throw Error('源码在原生构建期间发生变化，未登记候选。请保留最新改动并重新构建。');
-const measurements={version,branch:branch.output,commit:git.output,worktree:worktree.output,dirty:Boolean(worktree.output),buildTime:new Date().toISOString(),
+const measurements={platform:process.platform,arch:process.arch,version,branch:branch.output,commit:git.output,worktree:worktree.output,dirty:Boolean(worktree.output),buildTime:new Date().toISOString(),
   sourceFingerprint:finalSource.sha256,sourceFileCount:finalSource.fileCount,
   embeddedFrontendSha256,embeddedAssetsSha256,
   candidate:{app,dmg,binary,appSha256,appManifest,binaryBytes:await size(binary),appBytes:await size(app),dmgBytes:await size(dmg),...(signed && automaticMacUpdate ? {helperBytes:await size(resolve(app,'Contents/Helpers/update-helper'))}:{}),binarySha256:await sha256(binary),dmgSha256:await sha256(dmg),
@@ -215,7 +221,7 @@ const measurements={version,branch:branch.output,commit:git.output,worktree:work
     linkedLibraries:inspect('/usr/bin/otool',['-L',binary]).output,
     signature:inspect('/usr/bin/codesign',['-dv','--verbose=4',app]).output,signatureVerified:inspect('/usr/bin/codesign',['--verify','--deep','--strict',app]).code===0},
   baseline,buildMode,scope,
-  validationOnly:updateValidation,productionReady:readiness.productionReady,compression,dmgLayout,signed:signed?'developer-id':'adhoc',notarized:Boolean(notarization),notarization,
+  validationOnly:updateValidation,candidateOnly:productionCandidate,cargoRequestedFeatures,cargoDefaultFeatures:true,productionReady:readiness.productionReady,compression,dmgLayout,signed:signed?'developer-id':'adhoc',notarized:Boolean(notarization),notarization,
   automaticUpdate:signed && automaticMacUpdate?{format:'signed-notarized-dmg',teamId:apple.teamId,replacement:'atomic-bundle-swap'}:null,installed:false,published:false
 };
 measurements.sizeBudget = checkNativeArtifactSize(measurements.candidate);

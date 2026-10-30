@@ -30,9 +30,18 @@ export async function sourceFingerprint(root) {
   return { sha256: createHash('sha256').update(JSON.stringify(entries)).digest('hex'), fileCount: entries.length };
 }
 
-export async function verifyCandidate({ root, report, binary, allowManualAcceptance = false }) {
+export async function verifyCandidate({ root, report, binary, allowManualAcceptance = false, allowProductionCandidate = false }) {
   const manualAcceptance = allowManualAcceptance && report.buildMode === 'manual-acceptance' && report.candidate?.bundleId === 'app.xwxdeck.desktop';
-  if (!manualAcceptance && report.candidate?.bundleId !== 'app.xwxdeck.validation') throw Error('隔离启动需要 XwXDeck 验证构建；不会启动或替换正式应用。');
+  const platformEvidence = report.platform === 'darwin'
+    ? report.signed === 'developer-id' && report.notarized === true && report.candidate?.signatureVerified === true
+    : report.platform === 'win32' && report.arch === 'x64' && report.candidate?.architecture === 'x86_64'
+      && report.candidate.integrityLabel === 'medium' && ['Valid', 'NotSigned'].includes(report.candidate.signature);
+  const productionCandidate = allowProductionCandidate && report.buildMode === 'production-candidate'
+    && report.candidateOnly === true && report.candidate?.bundleId === 'app.xwxdeck.desktop'
+    && platformEvidence
+    && report.validationOnly === false && report.cargoDefaultFeatures === true
+    && Array.isArray(report.cargoRequestedFeatures) && report.cargoRequestedFeatures.length === 0;
+  if (!manualAcceptance && !productionCandidate && report.candidate?.bundleId !== 'app.xwxdeck.validation') throw Error('隔离启动需要 XwXDeck 验证构建；不会启动或替换正式应用。');
   if (!report.sourceFingerprint) throw Error('验证包缺少源码指纹，可能是旧阶段产物。请先运行 npm run build:native:isolated。');
   const current = await sourceFingerprint(root);
   if (current.sha256 !== report.sourceFingerprint) throw Error('验证包与当前本地源码不一致。请先运行 npm run build:native:isolated，避免检查旧界面或后端。');

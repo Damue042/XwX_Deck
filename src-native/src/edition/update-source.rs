@@ -98,6 +98,9 @@ pub(super) async fn manifest(_root: &Path) -> Result<Value> {
                 .map_err(err)?;
             verified_manifest(&bytes, &trust)?
         };
+        let isolated_candidate = std::env::args().any(|arg| arg == "--pilot-root")
+            && _root.join(".xwx-rust-pilot").is_file();
+        validate_candidate_feed(&manifest, &url, isolated_candidate)?;
         if manifest["schemaVersion"] != 1
             || manifest["channel"]
                 != if cfg!(feature = "update-validation") {
@@ -114,6 +117,61 @@ pub(super) async fn manifest(_root: &Path) -> Result<Value> {
     }
 }
 
+#[cfg(any(test, not(feature = "update-validation")))]
+fn validate_candidate_feed(manifest: &Value, feed: &reqwest::Url, isolated: bool) -> Result<()> {
+    let Some(candidate) = manifest.get("candidate") else {
+        if feed.host_str() == Some("download.xwxdeck.com")
+            && feed.path().starts_with("/candidates/")
+        {
+            return Err("候选更新缺少来源标识".into());
+        }
+        return Ok(());
+    };
+    let commit = text(candidate, "commit");
+    let fingerprint = text(candidate, "sourceFingerprint");
+    let is_hex = |value: &str, length| {
+        value.len() == length
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    };
+    let base = format!("https://download.xwxdeck.com/candidates/{commit}");
+    if !isolated
+        || candidate["schemaVersion"] != 1
+        || candidate["only"] != true
+        || !is_hex(commit, 40)
+        || !is_hex(fingerprint, 64)
+        || feed.as_str().trim_end_matches('/') != base
+    {
+        return Err("候选更新仅限对应来源的显式隔离目录".into());
+    }
+    let files = manifest["files"].as_array().ok_or("候选制品列表无效")?;
+    if files.len() != 4 {
+        return Err("候选制品必须覆盖四个发行身份".into());
+    }
+    let mut seen = std::collections::HashSet::new();
+    for file in files {
+        let name = match (
+            text(file, "platform"),
+            text(file, "arch"),
+            text(file, "kind"),
+        ) {
+            ("windows", "x64", "installer") => "XwX-Deck-windows-x64-setup.exe",
+            ("windows", "x64", "portable") => "XwX-Deck-windows-x64.exe",
+            ("darwin", "arm64", "disk-image") => "XwX-Deck-mac-arm64.dmg",
+            ("darwin", "x64", "disk-image") => "XwX-Deck-mac-x64.dmg",
+            _ => return Err("候选制品身份无效".into()),
+        };
+        if text(file, "name") != name
+            || text(file, "url") != format!("{base}/{name}")
+            || !seen.insert(name)
+        {
+            return Err("候选制品不属于当前隔离来源".into());
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn release_supported(manifest: &Value) -> bool {
     manifest["releaseSeries"]
         == if cfg!(feature = "update-validation") {
@@ -127,6 +185,42 @@ pub(super) fn release_supported(manifest: &Value) -> bool {
 mod signing_tests {
     use super::*;
     use ring::signature::{Ed25519KeyPair, KeyPair};
+
+    #[test]
+    fn candidate_manifest_requires_matching_source_feed_and_an_isolated_root() {
+        let commit = "a".repeat(40);
+        let base = format!("https://download.xwxdeck.com/candidates/{commit}");
+        let names = [
+            (
+                "windows",
+                "x64",
+                "installer",
+                "XwX-Deck-windows-x64-setup.exe",
+            ),
+            ("windows", "x64", "portable", "XwX-Deck-windows-x64.exe"),
+            ("darwin", "arm64", "disk-image", "XwX-Deck-mac-arm64.dmg"),
+            ("darwin", "x64", "disk-image", "XwX-Deck-mac-x64.dmg"),
+        ];
+        let manifest = json!({"candidate":{"schemaVersion":1,"commit":commit,"only":true,"sourceFingerprint":"b".repeat(64)},
+            "files":names.iter().map(|(platform,arch,kind,name)|json!({"platform":platform,"arch":arch,"kind":kind,"name":name,"url":format!("{base}/{name}")})).collect::<Vec<_>>()});
+        let feed = reqwest::Url::parse(&base).unwrap();
+        assert!(validate_candidate_feed(&manifest, &feed, true).is_ok());
+        assert!(validate_candidate_feed(&manifest, &feed, false).is_err());
+        let stable = reqwest::Url::parse("https://xwxdeck.com/updates/stable").unwrap();
+        assert!(validate_candidate_feed(&manifest, &stable, true).is_err());
+        assert!(validate_candidate_feed(&json!({"files":[]}), &stable, false).is_ok());
+        assert!(validate_candidate_feed(&json!({"files":[]}), &feed, true).is_err());
+        let mut altered = manifest.clone();
+        altered["candidate"]["commit"] = json!("c".repeat(40));
+        assert!(validate_candidate_feed(&altered, &feed, true).is_err());
+        altered = manifest.clone();
+        altered["files"][0]["url"] =
+            json!("https://download.xwxdeck.com/updates/stable/release.json");
+        assert!(validate_candidate_feed(&altered, &feed, true).is_err());
+        altered = manifest.clone();
+        altered["files"][1] = altered["files"][0].clone();
+        assert!(validate_candidate_feed(&altered, &feed, true).is_err());
+    }
 
     #[test]
     fn signed_payload_is_authenticated_before_parsing_and_rejects_tampering() {

@@ -1,9 +1,17 @@
 import { createPublicKey, sign, verify } from 'node:crypto';
 
-export function validateManifest(manifest) {
+export function validateManifest(manifest, {candidateId} = {}) {
   if (manifest.schemaVersion !== 1 || manifest.channel !== 'release' || manifest.releaseSeries !== 'native-v1'
       || !/^\d+\.\d+\.\d+$/.test(manifest.version) || manifest.tag !== `v${manifest.version}`
       || !Array.isArray(manifest.files) || manifest.files.length !== 4) throw Error('Invalid release manifest');
+  const candidate = candidateId !== undefined;
+  if (candidate) {
+    if (!/^[a-f0-9]{40}$/.test(candidateId) || manifest.candidate?.schemaVersion !== 1
+        || manifest.candidate.commit !== candidateId || manifest.candidate.only !== true
+        || !/^[a-f0-9]{64}$/.test(manifest.candidate.sourceFingerprint ?? '')) throw Error('Invalid candidate identity');
+  } else if (manifest.candidate !== undefined) throw Error('Candidate manifest is not a production release');
+  const base = candidate ? `https://download.xwxdeck.com/candidates/${candidateId}`
+    : `https://download.xwxdeck.com/releases/${manifest.tag}`;
   const identities = new Set();
   for (const file of manifest.files) {
     const identity = `${file.platform}/${file.arch}/${file.kind}`;
@@ -14,7 +22,7 @@ export function validateManifest(manifest) {
       'darwin/x64/disk-image': 'XwX-Deck-mac-x64.dmg'
     };
     if (identities.has(identity) || names[identity] !== file.name
-        || file.url !== `https://download.xwxdeck.com/releases/${manifest.tag}/${file.name}`
+        || file.url !== `${base}/${file.name}`
         || !Number.isSafeInteger(file.size) || file.size <= 0 || file.size > 1024 ** 3
         || !/^[a-f0-9]{64}$/.test(file.sha256)) throw Error('Invalid release artifact');
     identities.add(identity);
@@ -22,14 +30,14 @@ export function validateManifest(manifest) {
   return manifest;
 }
 
-export function signManifest(manifest, privateKey, keyId) {
-  validateManifest(manifest);
+export function signManifest(manifest, privateKey, keyId, options = {}) {
+  validateManifest(manifest, options);
   const payload = Buffer.from(JSON.stringify(manifest));
   return { schemaVersion: 1, algorithm: 'Ed25519', keyId,
     payload: payload.toString('base64'), signature: sign(null, payload, privateKey).toString('base64') };
 }
 
-export function verifyEnvelope(envelope, trust) {
+export function verifyEnvelope(envelope, trust, options = {}) {
   const key = trust.keys.find(key => key.id === envelope.keyId);
   if (envelope.schemaVersion !== 1 || envelope.algorithm !== 'Ed25519' || !key) throw Error('Untrusted update signing key');
   const payload = Buffer.from(envelope.payload ?? '', 'base64');
@@ -40,5 +48,5 @@ export function verifyEnvelope(envelope, trust) {
   if (!verify(null, payload, createPublicKey({key: spki, format: 'der', type: 'spki'}), Buffer.from(envelope.signature ?? '', 'base64'))) {
     throw Error('Update signature verification failed');
   }
-  return validateManifest(JSON.parse(payload));
+  return validateManifest(JSON.parse(payload), options);
 }

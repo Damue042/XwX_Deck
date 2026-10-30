@@ -5,7 +5,7 @@ pub(crate) const IMAGE_JOURNAL: &str = "compatible-image-gen.json";
 pub(crate) const DESKTOP_LEGACY_IDS: [&str; 2] = ["xwx-deck", "xwx-deck-deepseek"];
 pub(crate) const PROVIDER_CLIENTS: &[&str] = &["codex", "claude"];
 #[cfg(target_os = "macos")]
-pub(crate) const AUTOMATIC_MACOS_UPDATES: bool = cfg!(feature = "update-validation");
+pub(crate) const AUTOMATIC_MACOS_UPDATES: bool = true;
 pub(crate) const THEME_KEY: &str = "xwx-deck.theme";
 pub(crate) const LANGUAGE_KEY: &str = "xwx-deck.language";
 pub(crate) const SIDEBAR_KEY: &str = "xwx-deck.sidebar";

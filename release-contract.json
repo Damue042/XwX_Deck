@@ -34,14 +34,17 @@
     "metadataEnvironmentVariable": "XWX_DECK_METADATA_PUSH_URL",
     "startupCheckDelayMs": 6000,
     "nightly": {
-      "platform": "win32",
       "windowLocalHours": [
         2,
         5
       ],
       "idleThresholdSeconds": 900,
       "cancelledVersionPersists": true,
-      "requiresSafeShutdown": true
+      "requiresSafeShutdown": true,
+      "platforms": [
+        "win32",
+        "darwin"
+      ]
     },
     "artifactBase": "https://download.xwxdeck.com/releases",
     "signature": {
@@ -69,12 +72,13 @@
       "distribution": "developer-id-notarized-dmg",
       "developerId": true,
       "notarized": true,
-      "installMode": "manual-dmg",
+      "installMode": "automatic",
       "updateMetadata": "release.json",
-      "automaticInstall": false,
+      "automaticInstall": true,
       "platform": "darwin",
       "arch": "arm64",
-      "publishedArtifactName": "XwX-Deck-mac-arm64.dmg"
+      "publishedArtifactName": "XwX-Deck-mac-arm64.dmg",
+      "unsignedFallback": "manual-dmg"
     },
     "macosX64": {
       "buildScript": "build:mac:x64",
@@ -82,12 +86,13 @@
       "distribution": "developer-id-notarized-dmg",
       "developerId": true,
       "notarized": true,
-      "installMode": "manual-dmg",
+      "installMode": "automatic",
       "updateMetadata": "release.json",
-      "automaticInstall": false,
+      "automaticInstall": true,
       "platform": "darwin",
       "arch": "x64",
-      "publishedArtifactName": "XwX-Deck-mac-x64.dmg"
+      "publishedArtifactName": "XwX-Deck-mac-x64.dmg",
+      "unsignedFallback": "manual-dmg"
     }
   },
   "openSource": {
