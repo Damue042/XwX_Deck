@@ -147,14 +147,14 @@ try {
   const directCodex = await runCli(codex, codexArgs);
   assert.ok(directCodex.stdout.includes(answer)); assert.equal(requests.at(-1).auth, 'Bearer ' + token);
   pass('installed Codex loads the generated strict config and catalog and completes a real local Responses SSE request');
-  assert.equal(requests.at(-1).body.text.verbosity,'low');
+  assert.equal(requests.at(-1).body.text?.verbosity,undefined,'a native client template cannot prove relay verbosity support');
   declaredSearch=true;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   const searchArgs=[...codexArgs.slice(0,-1),'-c','web_search="live"',codexArgs.at(-1)];
-  assert.ok((await runCli(codex,searchArgs)).stdout.includes(answer));assert.ok(requests.at(-1).body.tools.some(t=>t.type==='web_search'||t.type==='web_search_preview'));
+  assert.ok((await runCli(codex,searchArgs)).stdout.includes(answer));assert.ok(!requests.at(-1).body.tools.some(t=>t.type==='web_search'||t.type==='web_search_preview'),'unverified relay search controls remain disabled');
   declaredSearch=false;declaredVerbosity=false;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
   assert.ok((await runCli(codex,codexArgs)).stdout.includes(answer));assert.ok(!requests.at(-1).body.text?.verbosity);
   declaredVerbosity=true;await writeNativeControls();await rpc('fetchProviderModels',{providerId:codexId,refresh:true});
-  pass('installed Codex consumes declared verbosity and search in actual requests; an explicit capability disable removes verbosity after refresh');
+  pass('installed Codex completes requests while unverified relay search and verbosity remain disabled across refreshes');
 
   const image = join(workspace, 'fixture.png');
   const pngChunk = (type, data) => { const bytes = Buffer.concat([Buffer.from(type), data]), length = Buffer.alloc(4), checksum = Buffer.alloc(4); length.writeUInt32BE(data.length); checksum.writeUInt32BE(crc32(bytes)); return Buffer.concat([length, bytes, checksum]); };
