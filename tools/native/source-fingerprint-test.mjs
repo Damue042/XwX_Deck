@@ -11,6 +11,9 @@ try {
   execFileSync('git', ['init', '-q'], { cwd: root });
   await mkdir(join(root, 'src-native')); await mkdir(join(root, 'docs')); await mkdir(join(root, 'test-results'));
   const source = join(root, 'src-native/含空格 source.rs'); await writeFile(source, 'first input');
+  const readinessPath = join(root, 'src-native/migration-status.json');
+  const readySource = JSON.stringify({ version: 1, productionReady: true, blockers: [] }) + '\n';
+  await writeFile(readinessPath, readySource);
   await writeFile(join(root, '.gitignore'), 'test-results/\n');
   execFileSync('git', ['add', '.'], { cwd: root });
   const first = await sourceFingerprint(root);
@@ -34,6 +37,68 @@ try {
     {candidate:{...windows.candidate,integrityLabel:'high'}},{candidate:{...windows.candidate,signature:'HashMismatch'}}]){
     await assert.rejects(verifyCandidate({root,report:{...windows,...changes},binary,allowProductionCandidate:true}));
   }
+  let productionChecks = 0;
+  const finalMac = { ...production, buildMode: 'production', productionReady: true, candidateOnly: false };
+  const finalWindows = { ...windows, buildMode: 'production', productionReady: true, candidateOnly: false };
+  const rejectProduction = async (report, options = {}, pattern) => {
+    await assert.rejects(verifyCandidate({ root, report, binary, allowProduction: true, ...options }), pattern);
+    productionChecks++;
+  };
+  for (const final of [finalMac, finalWindows]) {
+    await assert.rejects(verifyCandidate({ root, report: final, binary }));
+    productionChecks++;
+    await rejectProduction(final, { allowProduction: false });
+    await rejectProduction(final, { allowProduction: 'true' });
+    await rejectProduction(final, { allowProduction: false, allowProductionCandidate: true, allowManualAcceptance: true });
+    const verified = await verifyCandidate({ root, report: final, binary, allowProduction: true });
+    assert.equal(verified.buildMode, 'production');
+    assert.equal(verified.isolated, true);
+    productionChecks++;
+    for (const changes of [
+      { productionReady: false }, { productionReady: undefined }, { productionReady: 'true' },
+      { candidateOnly: true }, { candidateOnly: undefined },
+      { validationOnly: true }, { validationOnly: undefined },
+      { cargoDefaultFeatures: false }, { cargoDefaultFeatures: undefined },
+      { cargoRequestedFeatures: ['manual-acceptance'] }, { cargoRequestedFeatures: ['update-validation'] },
+      { cargoRequestedFeatures: undefined }, { cargoRequestedFeatures: {} },
+      { buildMode: 'production-candidate' }, { buildMode: undefined }, { platform: 'linux' },
+      { candidate: { ...final.candidate, bundleId: 'app.xwxdeck.validation' } },
+      { candidate: { ...final.candidate, bundleId: 'other.application' } }, { candidate: undefined }
+    ]) await rejectProduction({ ...final, ...changes });
+  }
+  for (const changes of [{ signed: 'adhoc' }, { notarized: false },
+    { candidate: { ...finalMac.candidate, signatureVerified: false } }]) {
+    await rejectProduction({ ...finalMac, ...changes });
+  }
+  for (const changes of [{ arch: 'arm64' },
+    { candidate: { ...finalWindows.candidate, architecture: 'aarch64' } },
+    { candidate: { ...finalWindows.candidate, integrityLabel: 'high' } },
+    { candidate: { ...finalWindows.candidate, signature: 'HashMismatch' } }]) {
+    await rejectProduction({ ...finalWindows, ...changes });
+  }
+  for (const value of [false, 'true', 1, null, undefined]) {
+    await writeFile(readinessPath, JSON.stringify({ productionReady: value }));
+    // Match the changed source fingerprint so this rejection specifically tests Ready.
+    await rejectProduction({ ...finalMac, sourceFingerprint: (await sourceFingerprint(root)).sha256 });
+  }
+  await rm(readinessPath);
+  const withoutReadyFingerprint = (await sourceFingerprint(root)).sha256;
+  await rejectProduction({ ...finalMac, sourceFingerprint: withoutReadyFingerprint });
+  // Existing isolated/manual/candidate paths still work without a Ready file.
+  for (const [legacyReport, options] of [
+    [report, {}], [production, { allowProductionCandidate: true }],
+    [windows, { allowProductionCandidate: true }],
+    [{ ...report, buildMode: 'manual-acceptance', candidate: { ...report.candidate, bundleId: 'app.xwxdeck.desktop' } }, { allowManualAcceptance: true }]
+  ]) {
+    assert.equal((await verifyCandidate({ root, report: { ...legacyReport, sourceFingerprint: withoutReadyFingerprint }, binary, ...options })).isolated, true);
+    productionChecks++;
+  }
+  await writeFile(readinessPath, '{invalid json');
+  await rejectProduction({ ...finalMac, sourceFingerprint: (await sourceFingerprint(root)).sha256 });
+  await writeFile(readinessPath, readySource);
+  await rejectProduction({ ...finalMac, sourceFingerprint: undefined }, {}, /缺少源码指纹/);
+  await rejectProduction({ ...finalMac, sourceFingerprint: '0'.repeat(64) }, {}, /当前本地源码不一致/);
+  await rejectProduction({ ...finalMac, candidate: { ...finalMac.candidate, binarySha256: '0'.repeat(64) } }, {}, /可执行文件与构建清单不一致/);
   await writeFile(join(root, 'docs/progress.md'), 'Documentation-only checkpoint');
   assert.equal((await sourceFingerprint(root)).sha256, first.sha256);
   await writeFile(join(root, 'test-results/other-output'), 'ignored build output');
@@ -47,6 +112,7 @@ try {
   await writeFile(source, 'first input');
   await writeFile(binary, 'modified executable');
   await assert.rejects(verifyCandidate({ root, report, binary }), /可执行文件与构建清单不一致/);
+  await rejectProduction(finalMac, {}, /可执行文件与构建清单不一致/);
   await assert.rejects(verifyCandidate({ root, report: { ...report, sourceFingerprint: undefined }, binary }), /缺少源码指纹/);
   await assert.rejects(verifyCandidate({ root, report: { ...report, candidate: { bundleId: 'app.xwxdeck.desktop' } }, binary }), /不会启动或替换正式应用/);
   if (process.platform === 'win32') {
@@ -55,5 +121,5 @@ try {
     await symlink(join(root, 'test-results'), join(root, 'src-native/linked'), 'junction');
   } else await symlink(binary, join(root, 'src-native/linked.rs'));
   await assert.rejects(sourceFingerprint(root), /不是普通文件/);
-  console.log(JSON.stringify({ passed: true, checks: 28, scope: 'isolated temporary Git repository, synthetic artifact bytes; no app launch or installed files touched' }));
+  console.log(JSON.stringify({ passed: true, checks: 28 + productionChecks, productionChecks, scope: 'isolated temporary Git repository, synthetic artifact bytes and platform trust reports; no app launch, OS signing verification or installed files touched' }));
 } finally { await rm(root, { recursive: true, force: true }); }

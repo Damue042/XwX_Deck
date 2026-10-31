@@ -30,7 +30,7 @@ export async function sourceFingerprint(root) {
   return { sha256: createHash('sha256').update(JSON.stringify(entries)).digest('hex'), fileCount: entries.length };
 }
 
-export async function verifyCandidate({ root, report, binary, allowManualAcceptance = false, allowProductionCandidate = false }) {
+export async function verifyCandidate({ root, report, binary, allowManualAcceptance = false, allowProductionCandidate = false, allowProduction = false }) {
   const manualAcceptance = allowManualAcceptance && report.buildMode === 'manual-acceptance' && report.candidate?.bundleId === 'app.xwxdeck.desktop';
   const platformEvidence = report.platform === 'darwin'
     ? report.signed === 'developer-id' && report.notarized === true && report.candidate?.signatureVerified === true
@@ -41,7 +41,14 @@ export async function verifyCandidate({ root, report, binary, allowManualAccepta
     && platformEvidence
     && report.validationOnly === false && report.cargoDefaultFeatures === true
     && Array.isArray(report.cargoRequestedFeatures) && report.cargoRequestedFeatures.length === 0;
-  if (!manualAcceptance && !productionCandidate && report.candidate?.bundleId !== 'app.xwxdeck.validation') throw Error('隔离启动需要 XwXDeck 验证构建；不会启动或替换正式应用。');
+  const production = allowProduction === true && report.buildMode === 'production'
+    && report.productionReady === true && report.candidateOnly === false
+    && report.candidate?.bundleId === 'app.xwxdeck.desktop' && platformEvidence
+    && report.validationOnly === false && report.cargoDefaultFeatures === true
+    && Array.isArray(report.cargoRequestedFeatures) && report.cargoRequestedFeatures.length === 0
+    && JSON.parse(await readFile(join(root, 'src-native/migration-status.json'), 'utf8')).productionReady === true;
+  if ((report.buildMode === 'production' && !production)
+    || (!manualAcceptance && !productionCandidate && !production && report.candidate?.bundleId !== 'app.xwxdeck.validation')) throw Error('隔离启动需要 XwXDeck 验证构建；不会启动或替换正式应用。');
   if (!report.sourceFingerprint) throw Error('验证包缺少源码指纹，可能是旧阶段产物。请先运行 npm run build:native:isolated。');
   const current = await sourceFingerprint(root);
   if (current.sha256 !== report.sourceFingerprint) throw Error('验证包与当前本地源码不一致。请先运行 npm run build:native:isolated，避免检查旧界面或后端。');
