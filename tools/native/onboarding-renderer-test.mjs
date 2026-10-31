@@ -16,7 +16,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 dom.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 const require = createRequire(resolve(base, 'package.json'));
 const React = require('react'), { act } = React, { createRoot } = require('react-dom/client');
-let snapshot, failure = false, importFailure = false, sourceProblem = '', heldDetection, importItems = [], done = 0, imports = 0, detections = 0, previews = 0, lastImport;
+let snapshot, failure = false, importFailure = false, sourceProblem = '', heldDetection, heldPreview, importItems = [], done = 0, imports = 0, detections = 0, previews = 0, lastImport;
 const opened = [];
 const { setupWebsitesFor } = await (async () => {
   const result = await esbuild.build({ entryPoints: [resolve(base, 'src/shared/setupWebsites.ts')], bundle: true, platform: 'node', format: 'cjs', write: false });
@@ -25,7 +25,7 @@ const { setupWebsitesFor } = await (async () => {
 const api = {
   setupWebsites: setupWebsitesFor('darwin', 'arm64'),
   detectClientInstallations: async () => { detections++; if (heldDetection) return heldDetection; if (failure) throw Error('检测失败，请重新检测'); return structuredClone(snapshot); },
-  previewConfigurationImport: async () => { previews++; if (importFailure) throw Error('导入读取失败'); return { targetDigest: 'fixture', sources: [{ source: 'magpie', path: '/isolated/providers.json', name: 'Magpie', found: !sourceProblem, error: sourceProblem, items: importItems }] }; },
+  previewConfigurationImport: async () => { previews++; if (heldPreview) return heldPreview; if (importFailure) throw Error('导入读取失败'); return { targetDigest: 'fixture', sources: [{ source: 'magpie', path: '/isolated/providers.json', name: 'Magpie', found: !sourceProblem, error: sourceProblem, items: importItems }] }; },
   importConfigurations: async input => { imports++; lastImport = input; return { providers: {}, added: [], modelClients: input.clients }; },
   openSetupWebsite: async site => opened.push(site)
 };
@@ -60,6 +60,26 @@ try {
     await click('上一步'); assert.equal(current(), 0);
   }
   console.log('PASS one usable client skips unrelated installation recommendations');
+  await render(['codex', 'claude']); await click('开始使用'); assert.equal(current(), 2);
+  let releasePreview;
+  heldPreview = new Promise(resolve => { releasePreview = resolve; });
+  const refreshedImportBack = () => document.querySelector('#onboarding-setup .onboarding-foot > .btn');
+  const writesBeforeRefresh = { imports, done };
+  await act(async () => document.querySelector('.configuration-import-refresh').click());
+  assert.equal(document.querySelector('.configuration-import-refresh').disabled, true);
+  assert.equal(refreshedImportBack().disabled, true, 'the parent Back must remain unavailable while this preview is pending');
+  await act(async () => refreshedImportBack().click());
+  assert.equal(current(), 2, 'a disabled Back click must not navigate or be replayed later');
+  const completedPreview = { targetDigest: 'fixture', sources: [{ source: 'magpie', path: '/isolated/providers.json', name: 'Magpie', found: true, error: '', items: importItems }] };
+  heldPreview = undefined;
+  await act(async () => releasePreview(completedPreview));
+  assert.equal(refreshedImportBack().disabled, false);
+  assert.equal(current(), 2, 'finishing the refresh must not replay the earlier disabled click');
+  await click('上一步');
+  assert.equal(current(), 0, 'an enabled Back returns to welcome when a client is already installed');
+  assert.deepEqual({ imports, done }, writesBeforeRefresh, 'refresh and Back must not import or finish setup');
+  console.log('PASS a pending import refresh disables Back; only a new enabled click returns to the correct step without writes');
+
   await render(['codex', 'claude', 'cursor', 'vscode', 'qwen-code']);
   assert.equal(heading(), '欢迎使用 XwX Deck');
   const hello = document.querySelector('.onboarding-step:not([hidden])');

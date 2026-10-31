@@ -86,11 +86,17 @@
     document.querySelector('[data-detected-client="codex"]').click(); await delay(50);
     check('explicit deselection mutes the client without writing settings', document.querySelector('[data-detected-client="codex"]').getAttribute('aria-pressed')==='false' && getComputedStyle(document.querySelector('[data-detected-client="codex"] .provider-brand-icon')).filter==='grayscale(1)' && (await window.xwxDeck.getModelClients()).length===0);
     document.querySelector('.configuration-import-refresh').click();
-    await wait(()=>!document.querySelector('.configuration-import-refresh').disabled&&importContinue(),'combined client and configuration refresh');
+    // Let this refresh commit its busy state before checking completion.
+    // An old enabled DOM snapshot can otherwise pass before React commits.
+    await delay(0);
+    const importBack = () => document.querySelector('#onboarding-setup .onboarding-foot > .btn');
+    const importBackReady = () => importBack()?.disabled === false && importBack().getAttribute('aria-disabled') !== 'true';
+    await wait(()=>!document.querySelector('.configuration-import-refresh').disabled&&importContinue()&&importBackReady(),'combined client and configuration refresh');
     check('import recheck retains detected clients and configuration preview',JSON.stringify(detectedClients())===JSON.stringify(expectedClients)&&!!document.querySelector('.configuration-import-list'));
     check('rechecking preserves explicit client deselection',document.querySelector('[data-detected-client="codex"]').getAttribute('aria-pressed')==='false');
     check('client detection and import preview do not change services or activate a route',JSON.stringify(await window.xwxDeck.getProviders())===onboardingProviders);
-    document.querySelector('#onboarding-setup .onboarding-foot > .btn').click();
+    await wait(importBackReady,'refreshed import return button is enabled');
+    importBack().click();
     await wait(()=>onboardingStep()===0||onboardingStep()===1,'back from import preserves the conditional recommendation');
     const backStep=onboardingStep();
     check('back from import reaches welcome or still-missing recommendations',backStep===(discovery.clients.some(c=>c.installed)?0:1));
