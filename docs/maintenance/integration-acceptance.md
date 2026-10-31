@@ -2,7 +2,7 @@
 
 2026-10-31，当前默认功能候选绑定 `8db902ff6375cf8407a43bd0dedf17bcef533f75`。
 Mac 真实 HTTPS 更新、健康确认和故障受控恢复通过。
-Windows 便携更新结果已由协调方回传，Setup 注册分支仍在执行。
+Windows Setup 与便携版的真实 HTTPS 核心更新和受控恢复均已回传通过。
 普通可视界面、托盘及真实账号等限制继续保留。
 当前状态见[正式候选 HTTPS 验收](production-candidate-https-20261031.md)。
 下方更早报告保留原候选范围，不能代替当前结果。
