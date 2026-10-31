@@ -1,5 +1,9 @@
 # 域名更新与分发
 
+本次范围为 Windows x64 安装版、便携版和 Apple Silicon Mac。
+旧的四制品流程完整保留在[历史归档](maintenance/archive/cloudflare-updates-before-three-artifacts-20261031.md)。
+当前证据见[正式候选验收](maintenance/production-candidate-https-20261031.md)。
+
 ## 来源和状态
 
 客户端使用官网固定入口。
@@ -13,10 +17,17 @@ Pages 将清单请求重定向到 R2。
 不新增域名解析，不在网页中保存发布凭据。
 网站重新部署不会覆盖 R2 中的清单。
 
-当前没有生产公钥，也未发布正式清单。
-端点返回 404 时，客户端显示检查失败。
+当前已配置获准使用的 Ed25519 公钥。
+本轮已上传隔离候选清单和严格三制品。
+候选前缀为 `candidates/8db902ff6375cf8407a43bd0dedf17bcef533f75/`。
+Mac 实际 HTTPS 更新和失败恢复已完成。
+Windows 便携版的实际结果由协调方单独回传。
+Setup 注册分支仍在验收，普通界面和托盘也未完成。
+本轮没有激活 stable，`productionReady=false`。
+候选上传不表示正式版本已经发布。
+
+更新端点返回 404 时，客户端显示检查失败。
 不能将其显示为已经是最新版。
-本文记录目标流程，不代表线上更新已经验收。
 
 ## 签名和校验
 
@@ -26,7 +37,7 @@ Pages 将清单请求重定向到 R2。
 客户端先验证签名，再解析更新信息。
 
 `assets/update-trust.json` 仅保存公钥。
-正式密钥生成和持久配置需要用户单独确认。
+本轮复用已有签名身份，不生成密钥或扩展读取权限。
 未配置公钥时，正式签名清单会被拒绝。
 测试仅使用进程内密钥，不保存测试私钥。
 
@@ -66,7 +77,7 @@ Mac 手动发布可使用已批准的专用钥匙串条目。
 node tools/release/write-release-manifest.mjs release-assets --keychain
 ```
 
-候选阶段使用 `--unsigned-preview`。
+候选预览可使用 `--unsigned-preview`。
 该模式仅生成 `release-unsigned.json`，不能用于正式更新。
 
 验收通过且发布凭据获准配置后，再执行上传：
@@ -86,9 +97,9 @@ npm run release:cloudflare -- release-assets --publish
 
 | 平台 | 当前安装方式 | 仍需实际验证 |
 | --- | --- | --- |
-| Windows 安装版 | Setup 替换和重启。 | 安装目录、文件占用、失败恢复和数据保留。 |
-| Windows 便携版 | 更新进程替换原路径 EXE，再重启。 | 实际替换、启动失败和备份保留。 |
-| Mac arm64、x64 | 签名应用下载并校验 DMG，确认后替换重启。 | 两个架构的最终签名包和实际安装。 |
+| Windows x64 安装版 | Setup 替换和重启。 | 当前注册分支仍在验收，不能提前计为通过。 |
+| Windows x64 便携版 | 更新进程替换原路径 EXE，再重启。 | 实际 HTTPS、替换、握手与受控恢复已回传；普通界面和托盘待验。 |
+| Apple Silicon Mac（arm64） | 签名应用下载并校验 DMG，确认后替换重启。 | 本轮成功与故障恢复已通过；持久浏览器偏好未验。 |
 
 普通签名构建已接入 Mac 自动替换助手。
 未签名和临时签名应用继续使用手动 DMG。
@@ -106,13 +117,14 @@ npm run release:cloudflare -- release-assets --publish
 候选沿用同一 HTTPS 域名和已批准公钥。
 它不增加产品更新频道。
 候选清单记录完整提交、源码指纹和隔离标识。
-四份制品仅使用 `candidates/完整提交/` 前缀。
-默认签名器和 stable 发布器拒绝这类清单。
+三份制品仅使用 `candidates/完整提交/` 前缀。
+候选使用显式候选签名参数。
+stable 发布器拒绝这类清单。
 普通客户端只有指定隔离数据根和匹配候选来源时才接受。
 
 清单生成器的候选参数为 `--candidate` 和 `--source-fingerprint`。
 正式签名同时要求 `--keychain`。
-签名前核对四份本地制品及 `candidate-acceptance.json`。
+签名前核对三份本地制品及 `candidate-acceptance.json`。
 该文件逐项记录摘要、大小、构建模式和验收结果。
 制品不得带人工验收或更新验证 feature。
 Mac 制品还需通过 Developer ID 和公证检查。
@@ -122,11 +134,23 @@ Mac 制品还需通过 Developer ID 和公证检查。
 实际上传还需 `--upload-candidate`、已审查的清单 SHA 和现有 Wrangler CLI 路径。
 它复用 Wrangler 4.155.0 的现有授权，不读取或新建 R2 令牌。
 所有本地文件和远端冲突均在写入前检查。
-只允许四份制品和候选 `release.json`，清单最后上传。
+只允许三份制品和候选 `release.json`，清单最后上传。
 每次写入后重新下载并核对字节。
 工具不读写 stable，不覆盖已发现内容不同的对象。
 Wrangler 未提供条件写入参数，因此该检查不是原子比较交换。
 同一候选前缀应由一个上传任务独占。
+
+## 已签候选的保留要求
+
+已上传候选 `release.json` 的 SHA-256 为：
+
+`36cfac7e190e1a7342ad1204b66595db385b5e4fa214c262cb2a7828515034de`。
+
+该清单仍包含历史更新说明。
+其原文涉及已取消的 Intel 范围，不作为当前支持承诺。
+本次文档修订不覆盖、重签或改写该清单。
+后续正式发布使用活动 Changelog，并按批准范围生成新清单。
+已有候选结果继续绑定原源码、清单和包哈希。
 
 ## 参考
 
