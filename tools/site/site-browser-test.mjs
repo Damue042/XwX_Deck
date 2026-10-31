@@ -263,6 +263,9 @@ try {
   assert.equal(await page.evaluate(async () => { await document.fonts.load('400 16px xVf'); await document.fonts.load('500 16px xVf'); return document.fonts.check('400 16px xVf') && document.fonts.check('500 16px xVf'); }), true, 'both website font weights load from the copied resource');
   checks.push('WE02: unpublished artifacts have no live links; Windows installer/portable and Apple Silicon choices remain truthful; Intel is not offered');
   await page.goto(url + '/configured/index.html', { waitUntil: 'networkidle' });
+  for (const [target, format] of Object.entries({ windows: 'EXE', portable: 'EXE', mac: 'DMG' })) {
+    assert.equal(await page.locator(`[data-download="${target}"] [data-download-status]`).textContent(), format);
+  }
   const download = page.waitForEvent('download');
   await page.locator('#recommended-download').click();
   assert.equal((await download).suggestedFilename(), 'fixture.exe');

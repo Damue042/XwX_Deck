@@ -382,7 +382,7 @@ document.querySelectorAll('[data-download]').forEach(a => {
   if (url) {
     a.href = url; a.removeAttribute('aria-disabled');
     const status = a.querySelector('[data-download-status]');
-    status.removeAttribute('data-i18n'); status.textContent = a.dataset.download === 'windows' ? 'EXE' : 'DMG';
+    status.removeAttribute('data-i18n'); status.textContent = a.dataset.download === 'mac' ? 'DMG' : 'EXE';
     return;
   }
   a.removeAttribute('href'); a.setAttribute('aria-disabled', 'true');

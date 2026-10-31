@@ -64,14 +64,34 @@ npm run test:site
 
 ## 下载与发布
 
-当前新仓库尚无安装包。主入口和 Windows 入口打开新仓库发布页，并明确标注尚未发布。
-两种 macOS 入口暂不可用，不提供失效下载链接。
-核实安装包后，在 `DOWNLOADS` 中填写对应地址；浏览器只推荐已配置的架构。
-下载指向实际已发布制品，不以网页更新表示软件更新已发布。
-仅填写已发布并核实的制品地址。
-网页不宣称尚未发布的版本已经可用。
+本次正式版本为 `1.0.0`，范围为 Windows x64 安装版、便携版和 Apple Silicon Mac。
+当前正式制品尚未就绪，`DOWNLOADS` 三项保持为空。
+主按钮展开发布状态，三个入口均不提供下载链接。
+隔离候选通过部分验收，不代表最终正式包可用。
+不得将 `candidates/` 地址填入正式下载入口。
 
-GitHub Pages 工作流先构建并验证官网。
+最终包完成验收并上传后，核对以下不可变地址，再填写 `DOWNLOADS`。
+目录中的版本标签带 `v` 前缀。
+
+| 入口 | 最终地址（待验收，不表示已上传） |
+| --- | --- |
+| `windows` | `https://download.xwxdeck.com/releases/v1.0.0/XwX-Deck-windows-x64-setup.exe` |
+| `portable` | `https://download.xwxdeck.com/releases/v1.0.0/XwX-Deck-windows-x64.exe` |
+| `mac` | `https://download.xwxdeck.com/releases/v1.0.0/XwX-Deck-mac-arm64.dmg` |
+
+三份文件分别核对最终字节数和 SHA-256。
+验收结果绑定最终包、源码提交和签名清单，不复用旧包摘要。
+`checksums.txt` 和各文件的 `.sha256` 必须来自同批最终包。
+当前上传器仅处理包与签名清单，发布时还需单独核对校验文件的上传及公开响应。
+版本清单使用 `releases/v1.0.0/release.json`。
+稳定清单最后激活，不随官网构建自动更新。
+网页上线前重新核对所有下载响应，不以网页更新表示软件已经发布。
+GitHub 仅提供源码入口，不作为制品下载源。
+
+现有生产站点由 Cloudflare Pages 托管。
+仓库中的 `.github/workflows/pages.yml` 保留 GitHub Pages 构建与手动部署入口。
+它不等于当前 Cloudflare Pages 的生产部署配置。
+本地预览输出可作为审核目录，实际部署需沿用已核实的现有 Pages 项目与域名绑定。
 文档发布在站点的 `docs/` 目录。构建使用 Pages 提供的路径，支持独立域名和仓库子路径。
 站点绑定 `xwxdeck.com`，Cloudflare 管理 DNS。
 更新清单入口使用官网固定路径。安装包使用 R2 版本路径。发布过程见 [域名更新与分发](../../docs/cloudflare-updates.md)。
@@ -80,11 +100,13 @@ GitHub Pages 工作流先构建并验证官网。
 无法确定架构时，点击后展开选择，不按 `MacIntel` 猜测芯片。
 识别在本地进行，最多等待 600 毫秒，不新增网络请求。
 用户开始操作后，迟到的识别结果不再更改按钮。
-“其他版本”提供全部已发布安装包、Mac 芯片查看提示和历史版本入口。
-两种 Mac 架构分别提供 DMG；可靠识别到 Intel 时直接选择对应安装包。
-未启用 JavaScript 时，仍可展开该列表下载。
+“其他版本”提供本次三种制品和 Mac 芯片查看提示。
+可靠识别到 Intel 时说明本次不提供该安装包，不增加下载入口。
+历史 Intel 构建能力和证据继续保留。
+当前未启用 JavaScript 时，仍可展开列表查看未发布状态。
+正式填写链接时同步更新 HTML 中的地址、文件格式和发布状态，保证无脚本访问也能下载。
 页尾提供 GitHub、QQ 群聊和 Discord 文字链接。
-官网采用已确认的 Urbanist 和 Noto Sans SC 字体参数。
+官网采用用户已确认的 xVf 和 Noto Sans SC 字体参数。
 发布页面不包含本地调试面板。
 
 ## 网站语言
@@ -105,7 +127,8 @@ GitHub Pages 工作流先构建并验证官网。
 网站只构建明确列出的使用手册章节，搜索使用相同范围。
 开发说明、同步记录、历史审计与执行报告只在仓库中维护，不发布到网站。
 文档分为开始使用、使用指南、进一步了解三个目录组。
-主题复用应用的 Urbanist、Noto Sans SC 和 Geist Mono 本地字体。
+文档主题复用应用的 Urbanist、Noto Sans SC 和 Geist Mono 本地字体。
+官网继续使用独立的 xVf 字体，不以文档主题覆盖。
 标题字重为 500，正文为 450，正文行高为 1.85。
 表格使用独立滚动区域，窄屏不会撑宽整页。
 Markdown 链接只为已发布页面或公开资源保留跳转；缺少目标的本地引用显示为普通文字。
