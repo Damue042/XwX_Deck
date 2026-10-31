@@ -38,8 +38,8 @@ try {
     await assert.rejects(verifyCandidate({root,report:{...windows,...changes},binary,allowProductionCandidate:true}));
   }
   let productionChecks = 0;
-  const finalMac = { ...production, buildMode: 'production', productionReady: true, candidateOnly: false };
-  const finalWindows = { ...windows, buildMode: 'production', productionReady: true, candidateOnly: false };
+  const finalMac = { ...production, buildMode: 'production', productionReady: true, dirty: false, candidateOnly: false };
+  const finalWindows = { ...windows, buildMode: 'production', productionReady: true, dirty: false, candidateOnly: false };
   const rejectProduction = async (report, options = {}, pattern) => {
     await assert.rejects(verifyCandidate({ root, report, binary, allowProduction: true, ...options }), pattern);
     productionChecks++;
@@ -56,6 +56,7 @@ try {
     productionChecks++;
     for (const changes of [
       { productionReady: false }, { productionReady: undefined }, { productionReady: 'true' },
+      { dirty: true }, { dirty: undefined }, { dirty: 'false' },
       { candidateOnly: true }, { candidateOnly: undefined },
       { validationOnly: true }, { validationOnly: undefined },
       { cargoDefaultFeatures: false }, { cargoDefaultFeatures: undefined },

@@ -42,7 +42,7 @@ export async function verifyCandidate({ root, report, binary, allowManualAccepta
     && report.validationOnly === false && report.cargoDefaultFeatures === true
     && Array.isArray(report.cargoRequestedFeatures) && report.cargoRequestedFeatures.length === 0;
   const production = allowProduction === true && report.buildMode === 'production'
-    && report.productionReady === true && report.candidateOnly === false
+    && report.productionReady === true && report.dirty === false && report.candidateOnly === false
     && report.candidate?.bundleId === 'app.xwxdeck.desktop' && platformEvidence
     && report.validationOnly === false && report.cargoDefaultFeatures === true
     && Array.isArray(report.cargoRequestedFeatures) && report.cargoRequestedFeatures.length === 0
