@@ -281,6 +281,7 @@
 | [reasoning-chat-providers-test.mjs](../tools/native/reasoning-chat-providers-test.mjs) | 后端默认入口 |
 | [trace-compaction-test.mjs](../tools/native/trace-compaction-test.mjs) | 后端默认入口 |
 | [trace-provider-warning-test.mjs](../tools/native/trace-provider-warning-test.mjs) | 后端默认入口 |
+| [static-downloads-test.mjs](../tools/release/static-downloads-test.mjs) | test:built 入口 |
 | [parity-test.mjs](../tools/shared-core/parity-test.mjs) | test:built 入口 |
 | [cloudflare-update-test.mjs](../tools/tests/cloudflare-update-test.mjs) | test:built 入口 |
 | [public-history-test.mjs](../tools/tests/public-history-test.mjs) | test:built 入口 |
