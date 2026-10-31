@@ -59,8 +59,20 @@ export async function prepareStaticDownloads({config:input,sourceDirectory,direc
 }
 function validateAcceptance(acceptance,config){
   const portable=config.files.find(f=>f.target==='portable');
-  if(acceptance?.passed!==true||acceptance.sourceCommit!==config.sourceCommit||acceptance.version!==config.version||acceptance.windowsNormalGui?.passed!==true||acceptance.windowsNormalGui.binarySha256!==portable.sha256||!hex64(acceptance.windowsNormalGui.receiptSha256)||!Array.isArray(acceptance.files)||acceptance.files.length!==3)fail('Final normal Windows GUI and exact package acceptance are still required');
+  const gui=acceptance?.windowsNormalGui,waiver=gui?.waiver;
+  const performed=gui?.passed===true&&gui.status!=='waived'&&hex64(gui.receiptSha256);
+  // A product owner may change manual-download acceptance scope. That records
+  // an unperformed test, never authorizes a denied tool or marks it passed.
+  const waived=gui?.status==='waived'&&gui.performed===false&&gui.passed===false&&gui.receiptSha256===null
+    &&waiver?.authority==='product-owner'&&waiver.scope==='static-manual-downloads'
+    &&waiver.version===config.version&&waiver.sourceCommit===config.sourceCommit
+    &&typeof waiver.reason==='string'&&waiver.reason.trim().length>0
+    &&hex64(waiver.decisionEvidenceSha256)&&Array.isArray(waiver.substituteEvidenceSha256)
+    &&waiver.substituteEvidenceSha256.length>0&&waiver.substituteEvidenceSha256.every(hex64)
+    &&acceptance.passed===false&&acceptance.releaseApproved===true&&acceptance.functionalEvidencePassed===true;
+  if((!performed&&!waived)||(performed&&acceptance?.passed!==true)||acceptance?.sourceCommit!==config.sourceCommit||acceptance.version!==config.version||gui?.binarySha256!==portable.sha256||!Array.isArray(acceptance.files)||acceptance.files.length!==3)fail('Final normal Windows GUI or explicit owner-scoped waiver and exact package acceptance are still required');
   for(const file of config.files){const row=acceptance.files.find(f=>f.name===file.name);if(row?.passed!==true||row.sha256!==file.sha256||row.size!==file.size||row.sourceFingerprint!==file.sourceFingerprint)fail('Final static package acceptance mismatch');}
+  return waived?'waived':'passed';
 }
 async function remoteState(object,fetchPublic){
   const options={redirect:'error',cache:'no-store',signal:AbortSignal.timeout(180000)};const head=await fetchPublic(object.url,{...options,method:'HEAD'});
@@ -68,8 +80,8 @@ async function remoteState(object,fetchPublic){
 }
 export async function publishStaticDownloads({config:input,directory,acceptance,uploader,fetchPublic=fetch,upload=false,singleWriter=false,trust}){
   const config=validateStaticDownloads(input),objects=objectsFor(config,resolve(directory));await verifyLocal(objects);await regular(resolve(directory,'static-candidate-envelope.json'));await regular(resolve(directory,'static-candidate-acceptance.json'));verifyStaticEvidence(config,await readFile(resolve(directory,'static-candidate-envelope.json')),JSON.parse(await readFile(resolve(directory,'static-candidate-acceptance.json'),'utf8')),trust);const plan=publicPlan(config,objects);
-  if(upload!==true)return{...plan,uploaded:false,normalWindowsGuiPassed:acceptance?.windowsNormalGui?.passed===true};
-  validateAcceptance(acceptance,config);if(singleWriter!==true||!uploader?.put)fail('Explicit single writer and existing uploader are required');
+  if(upload!==true){let status='pending';if(acceptance?.passed===true||acceptance?.releaseApproved===true||acceptance?.windowsNormalGui?.status==='waived')status=validateAcceptance(acceptance,config);return{...plan,uploaded:false,normalWindowsGuiPassed:status==='passed',normalWindowsGuiStatus:status,manualDownloadReleaseApproved:status==='passed'||status==='waived'};}
+  const guiStatus=validateAcceptance(acceptance,config);if(singleWriter!==true||!uploader?.put)fail('Explicit single writer and existing uploader are required');
   const lockPath=resolve(directory,'.static-downloads-publish.lock'),journalPath=resolve(directory,'static-downloads-publish-journal.json');let lock;
   try{lock=await open(lockPath,'wx');await lock.writeFile(JSON.stringify({pid:process.pid,sourceCommit:config.sourceCommit,startedAt:new Date().toISOString()})+'\n');await lock.close();}catch(error){if(lock){await lock.close().catch(()=>{});await unlink(lockPath).catch(()=>{});}throw error;}
   let journal={schemaVersion:1,sourceCommit:config.sourceCommit,version:config.version,objects:{},staticDownloadsOnly:true,conditionalPut:false,stableTouched:false};
@@ -86,7 +98,7 @@ export async function publishStaticDownloads({config:input,directory,acceptance,
       try{await uploader.put(object);}catch(e){journal.objects[object.key].phase='uncertain';await save();throw e;}
       if(await remoteState(object,fetchPublic)!=='identical')fail('Uploaded static object did not become visible; reconcile before retry');journal.objects[object.key].phase='verified';await save();objectsWritten++;
     }
-    journal.completedAt=new Date().toISOString();await save();return{...plan,uploaded:true,objectsWritten,publicBytesVerified:true};
+    journal.completedAt=new Date().toISOString();journal.normalWindowsGuiStatus=guiStatus;await save();return{...plan,uploaded:true,objectsWritten,publicBytesVerified:true,normalWindowsGuiPassed:guiStatus==='passed',normalWindowsGuiStatus:guiStatus,manualDownloadReleaseApproved:true};
   }finally{await unlink(lockPath).catch(error=>{if(error.code!=='ENOENT')throw error;});}
 }
 

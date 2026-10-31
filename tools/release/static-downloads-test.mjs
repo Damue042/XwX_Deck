@@ -381,3 +381,65 @@ test('the local lock rejects a concurrent caller but does not claim a remote CAS
   assert.equal(result.cas, false); assert.equal(result.conditionalPut, false); assert.equal(result.singleWriterRequired, true);
   await assert.rejects(lstat(join(f.directory, '.static-downloads-publish.lock')), {code: 'ENOENT'});
 });
+
+function syntheticOwnerWaiver(f) {
+  const acceptance = clone(f.acceptance);
+  acceptance.passed = false;
+  acceptance.releaseApproved = true;
+  acceptance.functionalEvidencePassed = true;
+  acceptance.windowsNormalGui = {
+    status: 'waived', performed: false, passed: false, receiptSha256: null,
+    binarySha256: f.config.files.find(file => file.target === 'portable').sha256,
+    waiver: {
+      authority: 'product-owner', scope: 'static-manual-downloads',
+      version: f.config.version, sourceCommit: f.config.sourceCommit,
+      reason: 'Synthetic scope-decision fixture; no actual GUI run or permission grant.',
+      decisionEvidenceSha256: hash(Buffer.from('synthetic owner decision')),
+      substituteEvidenceSha256: [hash(Buffer.from('synthetic exact-source functional evidence'))]
+    }
+  };
+  return acceptance;
+}
+
+test('an exact owner waiver approves seven static objects while retaining GUI not-performed status', async t => {
+  const f = await fixture(t); await f.prepare();
+  const acceptance = syntheticOwnerWaiver(f), remote = fakeRemote();
+  const dry = await f.publish(remote, {acceptance, upload: false});
+  assert.equal(remote.calls.length, 0); assert.equal(remote.puts.length, 0);
+  assert.equal(dry.normalWindowsGuiStatus, 'waived'); assert.equal(dry.normalWindowsGuiPassed, false);
+  assert.equal(dry.manualDownloadReleaseApproved, true);
+  const result = await f.publish(remote, {acceptance});
+  assert.equal(result.objectsWritten, 7); assert.equal(remote.puts.length, 7);
+  assert.equal(result.normalWindowsGuiStatus, 'waived'); assert.equal(result.normalWindowsGuiPassed, false);
+  assert.equal(result.manualDownloadReleaseApproved, true);
+  assert.equal(result.stableTouched, false); assert.equal(result.updateManifestWritten, false);
+  assert.equal(acceptance.passed, false); assert.equal(acceptance.windowsNormalGui.performed, false);
+  assert.equal(acceptance.windowsNormalGui.passed, false); assert.equal(acceptance.windowsNormalGui.receiptSha256, null);
+  const journal = JSON.parse(await readFile(join(f.directory, 'static-downloads-publish-journal.json'), 'utf8'));
+  assert.equal(journal.normalWindowsGuiStatus, 'waived');
+});
+
+test('wrong waiver scope/source or missing owner evidence rejects before any remote request', async t => {
+  const f = await fixture(t); await f.prepare();
+  for (const mutate of [
+    a => {a.windowsNormalGui.waiver.scope = 'automatic-updates';},
+    a => {a.windowsNormalGui.waiver.sourceCommit = 'c'.repeat(40);},
+    a => {delete a.windowsNormalGui.waiver.decisionEvidenceSha256;},
+    a => {a.windowsNormalGui.binarySha256 = 'd'.repeat(64);}
+  ]) {
+    const acceptance = syntheticOwnerWaiver(f); mutate(acceptance);
+    await noRemoteOnReject(f, {acceptance});
+  }
+});
+
+test('a waived GUI cannot be relabeled as a successful performed or overall test', async t => {
+  const f = await fixture(t); await f.prepare();
+  for (const mutate of [
+    a => {a.windowsNormalGui.passed = true;},
+    a => {a.passed = true;},
+    a => {a.passed = true; a.windowsNormalGui.passed = true; a.windowsNormalGui.receiptSha256 = hash(Buffer.from('synthetic fake performed receipt'));}
+  ]) {
+    const acceptance = syntheticOwnerWaiver(f); mutate(acceptance);
+    await noRemoteOnReject(f, {acceptance});
+  }
+});

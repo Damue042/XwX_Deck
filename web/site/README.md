@@ -142,6 +142,13 @@ node tools/release/static-downloads-test.mjs
 记录应包含本批三包摘要、来源指纹和该界面收据的 SHA-256。
 禁止仅修改状态来代替实际验收。
 
+产品所有者也可根据已有实测，明确调整该项验收范围。
+此时保留 `status=waived`、`performed=false` 和 `passed=false`。
+界面收据摘要保持为空，不生成未做过的收据。
+另列 `releaseApproved`、功能证据、所有者决定和摘要绑定。
+该决定只用于静态手动下载，不改变工具权限或其他完整性检查。
+本次记录见 [手动下载验收](../../docs/maintenance/manual-download-acceptance-20261031.md)。
+
 以下命令仅用于全部对应验收通过后。
 `<已有 Wrangler 路径>` 应指向已核实的 `wrangler.js` 4.155.0。
 当前尚未执行上传。
