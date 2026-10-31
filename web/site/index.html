@@ -268,6 +268,7 @@ const siteText = window.siteLanguage.text;
 /* 只填已发布并核实的制品地址。留空时明确提示不可下载。 */
 const RELEASES_URL = '#download-choices';
 const DOWNLOADS = { windows: '', portable: '', mac: '' };
+const DOWNLOAD_NOTICE = null;
 const hasPublishedDownloads = Object.values(DOWNLOADS).some(Boolean);
 const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -376,7 +377,12 @@ selectLinkedDemo();
 addEventListener('popstate', selectLinkedDemo);
 
 const msg = document.querySelector('.dl-msg');
-if (hasPublishedDownloads) { msg.textContent = ''; msg.removeAttribute('data-i18n'); }
+function syncDownloadNotice() {
+  if (!hasPublishedDownloads) return;
+  msg.removeAttribute('data-i18n');
+  msg.textContent = DOWNLOAD_NOTICE?.[window.siteLanguage.current] ?? '';
+}
+syncDownloadNotice();
 document.querySelectorAll('[data-download]').forEach(a => {
   const url = DOWNLOADS[a.dataset.download];
   if (url) {
@@ -412,6 +418,7 @@ addEventListener('site-language', () => {
   copy.textContent = tabs.find(tab => tab.getAttribute('aria-selected') === 'true').dataset.copy;
   recommendDownload(recommendedTarget, downloadContextKey);
   if (msg.dataset.message) msg.textContent = siteText(msg.dataset.message);
+  else syncDownloadNotice();
   syncDemoLanguage();
 });
 for (const frame of [demo, dashboard]) frame.addEventListener('load', syncDemoLanguage);

@@ -5,25 +5,29 @@
 ## 获取 XwX Deck
 
 下载入口统一位于 [官网](https://xwxdeck.com/#download)。
-首个正式版本为 `1.0.0`，当前尚未发布。
-安装包、校验文件和稳定更新清单仍待最终验收。
-官网当前不提供正式下载链接。
+首个版本为 `1.0.0`，可下载状态以官网为准。
+尚未提供对应链接时，请等待该平台发布。
+静态手动下载和稳定自动更新分阶段开放。
+提供安装包不表示自动更新渠道已启用。
 
 正式发布后，官网通过 Cloudflare 分发以下三种制品。
 GitHub 仅用于公开源码，不提供本次安装包下载。
 
-| 系统与安装方式 | 文件名 | 当前状态 |
+| 系统与安装方式 | 下载后的文件名 | 下载状态 |
 | --- | --- | --- |
-| Windows x64 安装版 | `XwX-Deck-windows-x64-setup.exe` | 待发布。 |
-| Windows x64 便携版 | `XwX-Deck-windows-x64.exe` | 待发布。 |
-| macOS Apple Silicon | `XwX-Deck-mac-arm64.dmg` | 待发布。 |
+| Windows x64 安装版 | `XwX-Deck-windows-x64-setup.exe` | 以官网为准。 |
+| Windows x64 便携版 | `XwX-Deck-windows-x64.exe` | 以官网为准。 |
+| macOS Apple Silicon | `XwX-Deck-mac-arm64.dmg` | 以官网为准。 |
 
 本次不提供 Intel Mac 安装包。
-正式文件使用 `download.xwxdeck.com/releases/v1.0.0/` 版本目录。
-发布后可用同批 `checksums.txt` 或单文件 `.sha256` 核对 SHA-256 摘要。
+文件由 `download.xwxdeck.com/releases/v1.0.0/` 分发。
+静态下载地址在文件扩展名前包含完整 SHA-256，浏览器保存时使用上表名称。
+下载菜单中的 `SHA-256` 链接提供同批总校验表。
+每个静态对象另有同名加 `.sha256` 的单文件校验。
+稳定更新所用的标准包名、`checksums.txt` 和签名清单留待后续发布。
 隔离候选地址不作为正式下载入口。
 
-以下安装步骤用于正式包发布后。
+以下安装步骤用于对应文件开放下载后。
 
 ## 在 macOS 安装
 

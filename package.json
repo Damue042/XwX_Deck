@@ -71,7 +71,7 @@
     "test:site": "node tools/site/site-browser-test.mjs",
     "test:docs": "node tools/site/docs-browser-test.mjs",
     "check:repository": "node tools/checks/check-repository-boundary.mjs",
-    "test:release-manifest": "node tools/tests/release-manifest-test.mjs && node tools/tests/cloudflare-update-test.mjs && node tools/tests/candidate-release-test.mjs && node tools/native/update-health-renderer-test.mjs && node tools/tests/keychain-signing-test.mjs",
+    "test:release-manifest": "node tools/tests/release-manifest-test.mjs && node tools/tests/cloudflare-update-test.mjs && node tools/tests/candidate-release-test.mjs && node tools/native/update-health-renderer-test.mjs && node tools/tests/keychain-signing-test.mjs && node tools/release/static-downloads-test.mjs",
     "test:folder-window-cleanup": "node tools/native/windows-folder-windows-test.mjs",
     "check:shared-parity": "node tools/shared-core/audit-parity.mjs --quiet",
     "sync:core": "node tools/shared-core/sync.mjs",

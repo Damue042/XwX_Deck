@@ -10,8 +10,14 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
 const root = resolve(import.meta.dirname, '../..');
-const output = resolve(process.env.XWX_SITE_OUTPUT_DIR ?? resolve(root, 'test-results/site-preview'));
+const args = process.argv.slice(2);
+assert.ok(args.every(arg => arg === '--static-downloads'), 'Unknown website build argument');
+const staticDownloadsMode = args.includes('--static-downloads');
+const output = resolve(process.env.XWX_SITE_OUTPUT_DIR ?? resolve(root, staticDownloadsMode ? 'test-results/site-static-downloads' : 'test-results/site-preview'));
 assert.ok(output.startsWith(resolve(root, 'test-results') + sep), 'Site output must stay in test-results');
+const staticDownloads = staticDownloadsMode
+  ? (await import('../release/static-downloads.mjs')).validateStaticDownloads(JSON.parse(await readFile(resolve(root, 'web/site/static-downloads.json'), 'utf8')))
+  : null;
 const assetVersion = async name => createHash('sha256').update(await readFile(resolve(output, name))).digest('hex').slice(0, 12);
 const examples = JSON.parse(await readFile(resolve(root, 'web/site/dashboard-examples.json'), 'utf8'));
 validateRealExamples(examples);
@@ -54,7 +60,16 @@ if (css.status !== 0) throw Error(`Renderer styles failed to build (${css.status
 const rendererCss = await readFile(resolve(root, 'dist/renderer/app.css'), 'utf8');
 await writeFile(resolve(output, 'app.css'), rendererCss.replaceAll('url(/fonts/', 'url(./fonts/'));
 await cp(resolve(root, 'web/site/index.html'), resolve(output, 'index.html'));
-for (const name of ['site.css', 'fonts.css', 'language.js', 'demo-tour.js', '_redirects', '_headers']) await cp(resolve(root, 'web/site', name), resolve(output, name));
+for (const name of ['site.css', 'fonts.css', 'language.js', 'demo-tour.js']) await cp(resolve(root, 'web/site', name), resolve(output, name));
+for (const name of ['_redirects', '_headers']) {
+  let routing = await readFile(resolve(root, 'web/site', name), 'utf8');
+  if (staticDownloadsMode) {
+    // Static downloads do not activate the future automatic update endpoint.
+    if (name === '_redirects') routing = routing.split(/\r?\n/).filter(line => !/^\s*\/updates\/stable\/release\.json(?:\s|$)/.test(line)).join('\n');
+    else routing = routing.replace(/^\/updates\/(?:\*|stable\/release\.json)\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*/gm, '');
+  }
+  if (routing.trim()) await writeFile(resolve(output, name), routing);
+}
 await cp(resolve(root, 'assets/fonts'), resolve(output, 'fonts'), { recursive: true });
 // The renderer emits content-addressed font files referenced by app.css.
 await cp(resolve(root, 'dist/renderer/fonts'), resolve(output, 'fonts'), { recursive: true });
@@ -126,6 +141,27 @@ await writeFile(resolve(output, 'view.html'), viewer);
 await writeFile(resolve(output, 'viewer.html'), viewer); // Keep existing preview links working.
 // Keep cached entry documents from combining old demo scripts with a new site.
 let indexHtml = await readFile(resolve(output, 'index.html'), 'utf8');
+if (staticDownloads) {
+  const notice = { 'zh-CN': '提供手动下载，自动更新渠道尚未启用。', en: 'Manual downloads are available. Automatic updates are not enabled.' };
+  const replaceOnce = (from, to) => {
+    assert.equal(indexHtml.split(from).length, 2, `Website static-download entry changed: ${from}`);
+    indexHtml = indexHtml.replace(from, to);
+  };
+  replaceOnce("const DOWNLOADS = { windows: '', portable: '', mac: '' };", 'const DOWNLOADS = ' + JSON.stringify(staticDownloads.downloads) + ';');
+  replaceOnce('const DOWNLOAD_NOTICE = null;', 'const DOWNLOAD_NOTICE = ' + JSON.stringify(notice) + ';');
+  for (const file of staticDownloads.files) {
+    const pattern = new RegExp(`<a\\b[^>]*data-download="${file.target}"[^>]*>[\\s\\S]*?<\\/a>`, 'g');
+    const choices = [...indexHtml.matchAll(pattern)];
+    assert.equal(choices.length, 1, 'Expected exactly one static download choice: ' + file.target);
+    const original = choices[0][0];
+    const linked = original.replace(/ aria-disabled="true"/, '').replace(/^(<a\b[^>]*)(>)/, `$1 href="${file.url}"$2`)
+      .replace(/(<span\b[^>]*data-download-status)[^>]*>[\s\S]*?<\/span>/, `$1>${file.target === 'mac' ? 'DMG' : 'EXE'}</span>`);
+    indexHtml = indexHtml.replace(original, linked);
+  }
+  replaceOnce('<span data-download-label data-i18n="releaseStatus">查看发布状态</span>', '<span data-download-label data-i18n="chooseDownload">选择下载版本</span>');
+  replaceOnce('<p class="dl-msg" role="status" data-i18n="installersUnavailable">Windows 和 Apple Silicon Mac 安装包尚未发布。</p>', `<p class="dl-msg" role="status">${notice['zh-CN']}</p>`);
+  replaceOnce('<p class="download-context" hidden></p>', `<p class="download-context" hidden></p>\n            <a class="download-context" data-static-checksums href="${staticDownloads.checksumsUrl}">SHA-256</a>`);
+}
 for (const name of ['fonts.css', 'site.css', 'hero-field.js', 'language.js', 'demo-tour.js']) {
   indexHtml = indexHtml.replaceAll('./' + name, './' + name + '?v=' + await assetVersion(name));
 }
@@ -135,4 +171,4 @@ await writeFile(resolve(output, 'index.html'), indexHtml);
 await writeFile(resolve(output, 'CNAME'), 'xwxdeck.com\n');
 await writeFile(resolve(output, '.nojekyll'), '');
 const bytes = (await readFile(resolve(output, 'app-preview.js'))).length + (await readFile(resolve(output, 'app.css'))).length;
-console.log(`[site] ${output} (${Math.round(bytes / 1024)} KB of generated renderer/style assets; no deployment)`);
+console.log(`[site] ${output} (${Math.round(bytes / 1024)} KB of generated renderer/style assets; ${staticDownloadsMode ? 'static manual downloads, automatic updates inactive; ' : ''}no deployment)`);

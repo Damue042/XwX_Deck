@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "version": "1.0.0",
+  "sourceCommit": "870d6e0aacad72e572722022f111b8d78af8d13e",
+  "candidateEnvelopeSha256": "7fc6bc81d4d397544c6477397171719bcbf9d8b94d814f4d783270ddf5c383fe",
+  "files": [
+    {
+      "target": "windows",
+      "name": "XwX-Deck-windows-x64-setup.exe",
+      "platform": "windows",
+      "arch": "x64",
+      "kind": "installer",
+      "size": 18586221,
+      "sha256": "860a67225c233bcb05994b0acbcee06e46c8ebf6a2b6173cc5402863304aa8dc",
+      "sourceFingerprint": "f2b1a64569cb1f94dd75ae4d8a0d4abab9a5015321b840f9cbb5eef3c6c4985e"
+    },
+    {
+      "target": "portable",
+      "name": "XwX-Deck-windows-x64.exe",
+      "platform": "windows",
+      "arch": "x64",
+      "kind": "portable",
+      "size": 15641088,
+      "sha256": "1ec72def330e16a6f58364c6dee2c61cfeebeeb5a72e097986572c52d7d5c738",
+      "sourceFingerprint": "f2b1a64569cb1f94dd75ae4d8a0d4abab9a5015321b840f9cbb5eef3c6c4985e"
+    },
+    {
+      "target": "mac",
+      "name": "XwX-Deck-mac-arm64.dmg",
+      "platform": "darwin",
+      "arch": "arm64",
+      "kind": "disk-image",
+      "size": 9812998,
+      "sha256": "b3e784faa1207094cadf8a2c8bcfa165893c550d8f90221f0da695b1eeb31804",
+      "sourceFingerprint": "5a127af48ad48b9aa9616a088a9856c5084b44ee877af474517c13371c180be9"
+    }
+  ]
+}

@@ -64,16 +64,117 @@ npm run test:site
 
 ## 下载与发布
 
-本次正式版本为 `1.0.0`，范围为 Windows x64 安装版、便携版和 Apple Silicon Mac。
-当前正式制品尚未就绪，`DOWNLOADS` 三项保持为空。
+本次版本为 `1.0.0`，范围为 Windows x64 安装版、便携版和 Apple Silicon Mac。
+静态手动下载和稳定自动更新分两阶段开放。
+本轮只准备本地构建与测试，没有上传制品或部署官网。
+Windows 普通身份验收补齐前，不执行 R2 或 Pages 写入。
+
+### 静态手动下载
+
+源码与默认 `build:site` 的 `DOWNLOADS` 三项保持为空。
 主按钮展开发布状态，三个入口均不提供下载链接。
-隔离候选通过部分验收，不代表最终正式包可用。
-不得将 `candidates/` 地址填入正式下载入口。
+显式选择静态模式时，构建从 `web/site/static-downloads.json` 注入下载配置。
+该文件是版本、来源提交、三包大小、SHA-256 与来源指纹的唯一配置源。
+构建复用 `tools/release/static-downloads.mjs` 校验配置，不另行填写下载地址。
+
+```sh
+npm run build:site
+npm run test:site
+npm run build:site -- --static-downloads
+node tools/site/site-static-downloads-test.mjs
+```
+
+默认输出仍为 `test-results/site-preview`。
+静态模式输出为 `test-results/site-static-downloads`，二者分开审核。
+静态模式同时生成 JavaScript 配置和无脚本下载链接。
+安装版、便携版与 Mac 分别显示 EXE、EXE 和 DMG。
+下载菜单中的 `SHA-256` 链接指向同批总校验表。
+
+静态预览需单独组装使用手册，再检查文档入口。
+
+```sh
+DOCS_BASE=/docs/ npm run docs:build
+cp -R docs/.vitepress/dist test-results/site-static-downloads/docs
+XWX_SITE_PREVIEW_DIR=test-results/site-static-downloads npm run test:docs
+```
+
+只复制到全新的 `docs` 目标，避免目录嵌套。
+
+静态对象位于 `releases/v1.0.0/`，文件扩展名前追加完整的 64 位 SHA-256。
+单文件校验对象为静态文件名加 `.sha256`。
+总校验文件名为 `static-downloads-来源提交-checksums.txt`。
+下载响应通过 `Content-Disposition` 提供原标准文件名。
+具体 URL 均由配置校验模块生成，不手工复制哈希。
+
+静态模式不会带出 stable 清单重定向及其专用缓存头。
+它不上传或激活 `updates/stable/release.json`，也不占用标准包名或 `release.json`。
+下载可用不表示自动更新渠道已经启用。
+后续正式更新仍需独立准备签名清单并完成发布验收。
+
+静态上传沿用已批准的 Wrangler 身份与既有存储桶。
+写入前先核对全部目标是否不存在或字节完全一致；不同字节必须停止。
+每次写入后，从公开地址读回并核对大小与完整哈希。
+Wrangler 不提供条件写入，预检不能替代原子比较交换（CAS）。
+同一批目标只允许一个发布任务写入，不覆盖已发现冲突的对象。
+本地页面测试拦截下载到合成 fixture，不访问尚未上传的 URL。
+
+本轮生产包仍来自 `870d6e0aacad72e572722022f111b8d78af8d13e`。
+官网准备不改变这些包，不要求重建应用。
+
+### 静态文件准备与上传
+
+先把已签候选的三份制品及验收记录放在独立目录。
+工具使用现有公钥验签，再核对版本、来源、大小和完整摘要。
+静态目录与候选输入目录保持分离。
+
+```sh
+node tools/release/static-downloads.mjs --prepare --source=../validated-candidate --directory=../static-downloads
+node tools/release/static-downloads.mjs --check --directory=../static-downloads --acceptance=../static-downloads/static-downloads-acceptance.pending.json
+node tools/release/static-downloads-test.mjs
+```
+
+准备操作生成三份包、三份单文件校验和一份总校验表。
+同目录的来源证明、计划和验收模板只供本地核对，不会上传。
+重复准备会核对既有内容，不覆盖不同字节。
+
+初始验收模板的 `passed` 和 `windowsNormalGui.passed` 均为 `false`。
+完成普通 Windows 界面验收后，另存实际验收记录。
+记录应包含本批三包摘要、来源指纹和该界面收据的 SHA-256。
+禁止仅修改状态来代替实际验收。
+
+以下命令仅用于全部对应验收通过后。
+`<已有 Wrangler 路径>` 应指向已核实的 `wrangler.js` 4.155.0。
+当前尚未执行上传。
+
+```sh
+node tools/release/static-downloads.mjs --upload-static --directory=../static-downloads --acceptance=../static-downloads/static-downloads-acceptance.json --wrangler-cli="<已有 Wrangler 路径>" --single-writer
+```
+
+上传先完整读取所有既有对象，核对大小和摘要。
+每次写入前再次核对，写入后重新下载验证。
+相同字节会复用，不同字节会停止。
+整个过程只使用静态内容名，不写标准更新对象。
+
+本地锁只保护同一静态目录，不是远端锁。
+执行者须确认没有其他发布进程。
+中断后的日志若表示结果未知，远端仍不可见时会停止。
+先核实原进程和 R2 实际结果，再处理本地恢复点。
+工具没有强制覆盖或跳过验收开关。
+
+本地回归接入 `npm run test:release-manifest`。
+新增测试仅使用合成包、临时测试密钥和内存网络替身。
+不会调用正式密钥、真实网络或上传服务。
+
+### 稳定自动更新
+
+以下标准路径留给后续稳定发布，不用于本次静态对象。
+最终验收及公开读回通过后，才可生成生产 URL 的签名清单并激活 stable。
+不得将 `candidates/` 清单或地址直接当作正式更新源。
 
 最终包完成验收并上传后，核对以下不可变地址，再填写 `DOWNLOADS`。
 目录中的版本标签带 `v` 前缀。
 
-| 入口 | 最终地址（待验收，不表示已上传） |
+| 入口 | 后续稳定发布地址（保留，不表示已上传） |
 | --- | --- |
 | `windows` | `https://download.xwxdeck.com/releases/v1.0.0/XwX-Deck-windows-x64-setup.exe` |
 | `portable` | `https://download.xwxdeck.com/releases/v1.0.0/XwX-Deck-windows-x64.exe` |
@@ -95,12 +196,15 @@ GitHub 仅提供源码入口，不作为制品下载源。
 仓库中的 `.github/workflows/pages.yml` 保留 GitHub Pages 构建与手动部署入口。
 它不等于当前 Cloudflare Pages 的生产部署配置。
 本地预览输出可作为审核目录。
-最终制品和公开下载验证完成后，才可由发布协调者执行部署。
+对应阶段的验收和公开下载验证完成后，才可由发布协调者执行部署。
 以下命令仅说明已核实的目标，本轮没有执行。
 
 ```sh
 wrangler pages deploy test-results/site-preview --project-name xwx-deck-site --branch main
 ```
+
+静态阶段审核和部署的目录为 `test-results/site-static-downloads`。
+该目录不包含未来 stable 专属路由，不可与默认预览混用。
 
 文档发布在站点的 `docs/` 目录。构建使用 Pages 提供的路径，支持独立域名和仓库子路径。
 站点绑定 `xwxdeck.com`，Cloudflare 管理 DNS。
@@ -113,8 +217,9 @@ wrangler pages deploy test-results/site-preview --project-name xwx-deck-site --b
 “其他版本”提供本次三种制品和 Mac 芯片查看提示。
 可靠识别到 Intel 时说明本次不提供该安装包，不增加下载入口。
 历史 Intel 构建能力和证据继续保留。
-当前未启用 JavaScript 时，仍可展开列表查看未发布状态。
-正式填写链接时同步更新 HTML 中的地址、文件格式和发布状态，保证无脚本访问也能下载。
+默认预览未启用 JavaScript 时，仍可展开列表查看未发布状态。
+静态模式的 HTML 地址、文件格式和状态均由同一配置注入。
+后续稳定阶段也需同步维护无脚本下载入口。
 页尾提供 GitHub、QQ 群聊和 Discord 文字链接。
 官网采用用户已确认的 xVf 和 Noto Sans SC 字体参数。
 发布页面不包含本地调试面板。
