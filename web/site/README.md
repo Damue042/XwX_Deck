@@ -89,9 +89,19 @@ npm run test:site
 GitHub 仅提供源码入口，不作为制品下载源。
 
 现有生产站点由 Cloudflare Pages 托管。
+已只读核实项目为 `xwx-deck-site`，生产分支为 `main`。
+项目绑定 `xwxdeck.com` 和 `www.xwxdeck.com`。
+该项目采用直接上传，没有连接 Git 自动发布。
 仓库中的 `.github/workflows/pages.yml` 保留 GitHub Pages 构建与手动部署入口。
 它不等于当前 Cloudflare Pages 的生产部署配置。
-本地预览输出可作为审核目录，实际部署需沿用已核实的现有 Pages 项目与域名绑定。
+本地预览输出可作为审核目录。
+最终制品和公开下载验证完成后，才可由发布协调者执行部署。
+以下命令仅说明已核实的目标，本轮没有执行。
+
+```sh
+wrangler pages deploy test-results/site-preview --project-name xwx-deck-site --branch main
+```
+
 文档发布在站点的 `docs/` 目录。构建使用 Pages 提供的路径，支持独立域名和仓库子路径。
 站点绑定 `xwxdeck.com`，Cloudflare 管理 DNS。
 更新清单入口使用官网固定路径。安装包使用 R2 版本路径。发布过程见 [域名更新与分发](../../docs/cloudflare-updates.md)。
