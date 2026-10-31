@@ -188,7 +188,7 @@ jobs:
 
       - name: Upload Windows verification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-verification
           path: |
@@ -208,7 +208,7 @@ jobs:
           Copy-Item "release/XwX Deck Setup.exe" "release-upload/XwX-Deck-windows-x64-setup.exe"
 
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-x64
           path: release-upload/*
@@ -286,7 +286,7 @@ jobs:
 
       - name: Upload macOS verification evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}-verification
           path: |
@@ -301,7 +301,7 @@ jobs:
           cp "release-native/XwX-Deck-mac-${{ matrix.arch }}.dmg" release-upload/
 
       - name: Upload macOS artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: release-upload/*
@@ -367,7 +367,7 @@ jobs:
           subject-path: release-assets/*
 
       - name: Save candidate distribution files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-distribution-candidate
           path: release-assets/*
