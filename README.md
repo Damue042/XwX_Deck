@@ -13,7 +13,7 @@
   <a href="https://xwxdeck.com/#download">下载</a>
 </p>
 
-本次发行范围为 Windows x64 和 Apple Silicon Mac。
+本次发行范围为 Windows x64 安装版、便携版和 Apple Silicon Mac。
 暂不提供 Intel Mac 安装包。
 具体文件与验收边界见[发布平台范围](docs/maintenance/release-platform-scope-20261030.md)。
 
@@ -38,14 +38,22 @@ XwX Deck 配合已有 AI 客户端使用。配置模型连接，按需开启 Tra
 
 ## 下载
 
-当前尚未首次正式发布，安装包和自动更新将在验收完成后提供。
+首个正式版本 `1.0.0` 尚未发布。
+安装包、校验文件和稳定更新清单将在最终验收完成后提供。
+当前官网不提供正式下载链接。
+正式发布后，从 [官网下载入口](https://xwxdeck.com/#download) 获取以下三种制品。
 
-| 平台 | 安装包 | 安装方式 |
+| 平台与安装方式 | 文件名 | 当前状态 |
 | --- | --- | --- |
-| macOS Apple Silicon | [下载 DMG](https://github.com/Damue042/XwX_Deck/releases/latest/download/XwX-Deck-mac-arm64.dmg) | 打开后拖入“应用程序”。 |
-| Windows x64 | [下载安装包](https://github.com/Damue042/XwX_Deck/releases/latest/download/XwX-Deck-windows-x64-setup.exe) | 下载后按提示安装。 |
+| Windows x64 安装版 | `XwX-Deck-windows-x64-setup.exe` | 待发布。 |
+| Windows x64 便携版 | `XwX-Deck-windows-x64.exe` | 待发布。 |
+| macOS Apple Silicon | `XwX-Deck-mac-arm64.dmg` | 待发布。 |
 
-[安装与更新说明](https://xwxdeck.com/docs/download)　[GitHub Releases 与更新记录](https://github.com/Damue042/XwX_Deck/releases)
+官网通过 Cloudflare 分发安装包，版本目录为 `download.xwxdeck.com/releases/v1.0.0/`。
+GitHub 仅维护 [公开源码](https://github.com/Damue042/XwX_Deck)，不作为本次制品下载源。
+隔离候选不作为正式下载入口。
+
+[安装与更新说明](https://xwxdeck.com/docs/download)
 
 Windows 按用户 Setup 的构建、数据保留和升级验收见 [Windows 安装说明](docs/windows-setup.md)。
 

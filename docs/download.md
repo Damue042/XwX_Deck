@@ -4,26 +4,37 @@
 
 ## 获取 XwX Deck
 
-从 [GitHub Releases](https://github.com/Damue042/XwX_Deck/releases/latest) 获取已发布安装包。
-选择对应系统和架构的文件。
+下载入口统一位于 [官网](https://xwxdeck.com/#download)。
+首个正式版本为 `1.0.0`，当前尚未发布。
+安装包、校验文件和稳定更新清单仍待最终验收。
+官网当前不提供正式下载链接。
 
-| 系统 | 安装包 |
-| --- | --- |
-| macOS，Apple Silicon | `XwX-Deck-mac-arm64.dmg`。 |
-| macOS，Intel | `XwX-Deck-mac-x64.dmg`。 |
-| Windows，x64 | `XwX-Deck-windows-x64-setup.exe`。 |
+正式发布后，官网通过 Cloudflare 分发以下三种制品。
+GitHub 仅用于公开源码，不提供本次安装包下载。
 
-未列出的系统与架构，请先查看对应 Release 的说明。
+| 系统与安装方式 | 文件名 | 当前状态 |
+| --- | --- | --- |
+| Windows x64 安装版 | `XwX-Deck-windows-x64-setup.exe` | 待发布。 |
+| Windows x64 便携版 | `XwX-Deck-windows-x64.exe` | 待发布。 |
+| macOS Apple Silicon | `XwX-Deck-mac-arm64.dmg` | 待发布。 |
+
+本次不提供 Intel Mac 安装包。
+正式文件使用 `download.xwxdeck.com/releases/v1.0.0/` 版本目录。
+发布后可用同批 `checksums.txt` 或单文件 `.sha256` 核对 SHA-256 摘要。
+隔离候选地址不作为正式下载入口。
+
+以下安装步骤用于正式包发布后。
 
 ## 在 macOS 安装
 
-1. 按芯片选择 Apple Silicon 或 Intel 对应的 DMG。
+1. 确认 Mac 使用 Apple M 系列芯片，下载 Apple Silicon DMG。
 2. 打开 DMG，将 `XwX Deck.app` 拖入“应用程序”。
 3. 从“应用程序”启动 XwX Deck。
 4. 完成首次引导，或跳过后在设置中添加连接。
 
 更新时，先停止 Trace 并退出旧应用，再替换文件。
 不要从安装映像中长期运行应用。
+正式 Mac 包须完成 Developer ID 签名和 Apple 公证。
 
 补充说明见 [macOS 安装](macos-first-run.md)。
 
@@ -35,7 +46,7 @@
 
 需要便携版时，另行下载 `XwX-Deck-windows-x64.exe`，放在可写目录运行。
 
-更新时，按应用提示下载并完成重启更新。
+正式更新发布后，按应用提示下载并完成重启更新。
 已下载更新且应用保持运行时，可在空闲时段自动安装。
 自动安装要求在 02:00 至 05:00，且系统已空闲至少 15 分钟。
 需确认的活动会话会阻止安装。
@@ -45,14 +56,13 @@
 
 ## 更新 macOS 版
 
-1. 在应用设置中检查更新，并下载新版本。
-2. 下载完成后，点击“打开安装包”。
-3. 确认并等待旧应用安全退出。
-4. 将新版拖入“应用程序”，选择替换。
-5. 从“应用程序”启动新版。
+正式更新发布后，在应用设置中检查版本。
+应用完成下载和校验后，按提示确认安装与重启。
+如果仍有活动请求，先等待请求结束或按提示停止。
 
-应用负责下载和校验安装包，最后的拖拽替换由用户完成。
-如果没有通过应用下载，也可以从发布页获取 DMG，按相同步骤替换。
+需要手动安装时，从官网获取对应版本的正式 DMG。
+停止 Trace 并退出旧应用，再将新版拖入“应用程序”替换。
+从“应用程序”启动新版，确认正常运行后推出安装映像。
 
 ## 准备客户端
 

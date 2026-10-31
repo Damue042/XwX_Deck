@@ -53,7 +53,7 @@ for (const relative of docs) {
   }
 }
 const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
-for (const phrase of ['XwX Deck','好工具，更简单','Apache License 2.0','https://xwxdeck.com/docs/','GitHub Releases']) {
+for (const phrase of ['XwX Deck','好工具，更简单','Apache License 2.0','https://xwxdeck.com/docs/','https://xwxdeck.com/#download','Cloudflare']) {
   if (!readme.includes(phrase)) errors.push(`README.md: missing ${phrase}`);
 }
 const development = fs.readFileSync(path.join(root, 'docs/development.md'), 'utf8');
