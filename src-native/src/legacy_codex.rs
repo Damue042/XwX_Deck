@@ -105,6 +105,21 @@ const DIRECT_PROVIDER_FIELDS: &[&str] = &[
     "env_key_instructions",
 ];
 
+/// Keep accepted user edits outside Deck's ownership on subsequent rewrites.
+pub(super) fn rebase_external_direct_fields(
+    baseline: &mut DocumentMut,
+    current: &DocumentMut,
+    previous: &Value,
+) -> Result<()> {
+    let managed = doc(text(previous, "managed"))?;
+    for key in DIRECT_ROOT_FIELDS {
+        if semantic(current.get(key)) != semantic(managed.get(key)) {
+            patch(baseline, "", key, current.get(key));
+        }
+    }
+    Ok(())
+}
+
 /// Release only values still owned by the recorded direct configuration. An
 /// unrelated edit inside the same table must survive returning to official.
 pub(super) fn release_direct_fields(current: &mut DocumentMut, ledger: &Value) -> Result<()> {
@@ -696,6 +711,39 @@ impl Pilot {
 #[cfg(test)]
 mod direct_tests {
     use super::*;
+    #[test]
+    fn repeated_direct_rewrites_preserve_external_root_edits_and_owned_restoration() {
+        for (original, managed, external, expected) in [
+            (None, None, Some(250000), Some(250000)),
+            (Some(100000), Some(200000), Some(250000), Some(250000)),
+            (Some(100000), Some(200000), None, None),
+            (Some(100000), Some(200000), Some(200000), Some(100000)),
+        ] {
+            let config = |model: &str, compact: Option<i64>| {
+                let mut document = doc(&format!("model = \"{model}\"\n")).unwrap();
+                if let Some(compact) = compact {
+                    document["model_auto_compact_token_limit"] = value(compact);
+                }
+                document
+            };
+            let mut baseline = config("official", original);
+            let managed = config("service", managed);
+            let mut current = config("service", external);
+            current["unrelated"] = value(true);
+            let previous = json!({"managed":managed.to_string()});
+            rebase_external_direct_fields(&mut baseline, &current, &previous).unwrap();
+            assert!(baseline.get("unrelated").is_none(), "do not adopt the whole document");
+            let next = json!({"before":baseline.to_string(),"managed":current.to_string(),"providerId":"xwx_deck","providerIds":["xwx_deck"]});
+            release_direct_fields(&mut current, &next).unwrap();
+            assert_eq!(current["model"].as_str(), Some("official"));
+            assert_eq!(
+                current.get("model_auto_compact_token_limit").and_then(Item::as_integer),
+                expected
+            );
+            assert_eq!(current["unrelated"].as_bool(), Some(true));
+        }
+    }
+
     #[test]
     fn release_all_legacy_direct_fields_without_reverting_foreign_edits() {
         let before="model = \"official\"\nservice_tier = \"flex\"\n[features]\njs_repl = true\n[model_providers.custom_provider]\nname = \"old\"\nbase_url = \"https://old.fixture/v1\"\n[model_providers.xwx_deck]\nbase_url = \"https://shared.fixture/v1\"\nrequires_openai_auth = true\n";
