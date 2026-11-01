@@ -462,10 +462,17 @@
       window.xwxDeck.getSubscriptionAccounts = async () => renamedSnapshot();
       window.xwxDeck.refreshSubscriptionUsage = async () => renamedSnapshot();
       window.xwxDeck.renameSubscriptionAccount = async input => { fixtureLabel=input.label; return window.xwxDeck.getProviders(); };
+      const fixtureIdentityMatches = () => {
+        const email = fixturePlatform+'@example.test';
+        const name = fixtureLabel.trim() || email;
+        const identity = document.querySelector('[data-account-id="ui-fixture"] .account-disclosure strong');
+        return identity?.textContent === name && identity.title === (email === name ? name : `${name}\n${email}`);
+      };
       for (const platform of ['grok','copilot','claude','cursor']) {
         fixturePlatform=platform; fixtureQuota={remainingPercent:77,resetsAt:1792240103}; fixtureQuotaError=undefined;
         document.querySelector(`[data-subscription-service="${platform}"]`).click();
-        await wait(() => document.querySelector('[data-account-id="ui-fixture"] .account-disclosure')?.textContent.includes(platform+'@example.test'), platform+' account');
+        await wait(fixtureIdentityMatches, platform+' account name and email hint');
+        check(`${platform} account keeps its visible name and hover email without a duplicate email row`, fixtureIdentityMatches() && document.querySelector('[data-account-id="ui-fixture"] .account-disclosure').textContent.trim() === fixtureLabel);
         check(`${platform} allowance defaults to collapsed`, document.querySelector('[data-account-id="ui-fixture"] .account-disclosure').getAttribute('aria-expanded')==='false' && !document.querySelector('[data-account-id="ui-fixture"] [role=meter]'));
         document.querySelector('[data-account-id="ui-fixture"] .account-disclosure').click();
         await wait(() => document.querySelector('[data-account-id="ui-fixture"] .account-quota [role=meter]'), platform+' allowance');
@@ -489,11 +496,11 @@
       check('account identity is an allowance disclosure with rename only in the menu', !document.querySelector('.subscription-rename-trigger') && !!document.querySelector('[data-account-id="ui-fixture"] .account-disclosure'));
       await openRename(); await fill('[aria-label="账号名称"]', '个人账号');
       document.querySelector('[aria-label="保存账号名称"]').click();
-      await wait(() => document.querySelector('[data-account-id="ui-fixture"] strong')?.textContent === '个人账号' && !document.querySelector('.subscription-rename input'), 'account rename saved');
-      check('menu rename saves the same identity and returns to the disclosure', fixtureLabel === '个人账号' && !!document.querySelector('[data-account-id="ui-fixture"] .account-disclosure'));
+      await wait(() => fixtureLabel === '个人账号' && fixtureIdentityMatches() && !document.querySelector('.subscription-rename input'), 'account rename saved with email hint');
+      check('menu rename saves the same identity and email hint and returns to the disclosure', fixtureLabel === '个人账号' && fixtureIdentityMatches() && !!document.querySelector('[data-account-id="ui-fixture"] .account-disclosure'));
       await openRename(); document.querySelector('[aria-label="账号名称"]').dispatchEvent(new KeyboardEvent('keydown', { key:'Escape', bubbles:true }));
       await wait(()=>!document.querySelector('.subscription-rename input'),'cancel rename');
-      check('Escape cancels account rename without closing configuration or losing the name', document.querySelectorAll('[role=dialog]:not([data-position])').length === 1 && document.querySelector('[data-account-id="ui-fixture"] strong').textContent === fixtureLabel);
+      check('Escape cancels account rename without closing configuration or losing the name and email hint', document.querySelectorAll('[role=dialog]:not([data-position])').length === 1 && fixtureIdentityMatches());
       window.xwxDeck.getSubscriptionAccounts = accountSnapshot; window.xwxDeck.renameSubscriptionAccount = renameAccount; window.xwxDeck.refreshSubscriptionUsage = usageRefresh;
 
       document.querySelector('#configuration-clients-tab').click(); await delay(150);
