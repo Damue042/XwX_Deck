@@ -4,7 +4,9 @@ import { ChevronRight } from 'lucide-react';
 type Identity = { label: string; email?: string };
 
 export function AccountIdentity({ label, email }: Identity): React.ReactElement {
-  return <span className="subscription-account-identity"><strong title={label}>{label}</strong>{email && email !== label && <span title={email}>{email}</span>}</span>;
+  const name = label?.trim() || email || '';
+  const details = email && email !== name ? `${name}\n${email}` : name;
+  return <span className="subscription-account-identity"><strong title={details}>{name}</strong></span>;
 }
 
 export function AccountDisclosure({ account, expanded, controls, onToggle }: {
