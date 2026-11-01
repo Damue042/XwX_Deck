@@ -101,6 +101,14 @@ try{
  const hint=document.querySelector('.fr-label[title]');assert.ok(hint.title.includes('Copilot Chat')&&hint.title.includes('代码补全'));assert.equal(document.body.textContent.includes('代码补全'),false);
  await choose(modelButton(),'a-new');await wait(()=>saved.model==='a-new'&&!modelButton().disabled,'Copilot saved');assert.equal(writes.at(-1).client,'vscode');assert.equal(notices.findLast(n=>n[0]==='success')[1],'模型已同步，可在 Copilot 中选择');
  pass('VS Code is clearly named Copilot, the scope stays in hover and saving directs model selection to Copilot');
+ saved={...saved,compatibilityNotice:'请更新 VS Code 至支持当前配置格式的版本'};
+ await render(false,'vscode');await render(true,'vscode');
+ await wait(()=>notices.some(n=>n[2]==='warning'&&n[1]==='客户端需要更新'),'version warning');
+ const warningCount=notices.filter(n=>n[2]==='warning'&&n[1]==='客户端需要更新').length;
+ await render(false,'vscode');await render(true,'vscode');await act(async()=>new Promise(r=>setTimeout(r,30)));
+ assert.equal(notices.filter(n=>n[2]==='warning'&&n[1]==='客户端需要更新').length,warningCount);
+ pass('unsupported client versions produce one actionable toast without repeated warnings on tab changes');
+
  let secret='synthetic-api-key';const renderSecret=async active=>act(async()=>root.render(React.createElement(SecretInput,{id:'audit-api-key',active,value:secret,onChange:()=>{}})));
  await renderSecret(true);assert.equal(document.getElementById('audit-api-key').type,'password');await act(async()=>document.querySelector('.secret-input-visibility').click());assert.equal(document.getElementById('audit-api-key').type,'text');assert.equal(document.querySelector('.secret-input-visibility').type,'button');
  await renderSecret(false);await renderSecret(true);assert.equal(document.getElementById('audit-api-key').type,'password');secret='';await renderSecret(true);assert.equal(document.querySelector('.secret-input-visibility'),null);

@@ -963,7 +963,7 @@ pub(super) fn plan(
         )?);
     } else {
         if !pilot.client_discovery().management_supported(id) {
-            return Err("当前 VS Code 版本不支持模型配置，请更新后重试".into());
+            return Err("未检测到支持当前模型配置格式的 VS Code。请更新至 1.122 或更新版本，并更新 Copilot Chat、重载窗口后重试。".into());
         }
         let group = vscode_model_group(&pilot.local_catalog(provider)?, model, &base, api)?;
         for path in &paths {

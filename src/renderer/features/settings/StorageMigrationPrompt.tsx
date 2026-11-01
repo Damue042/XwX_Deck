@@ -5,10 +5,12 @@ import { showErrorToast, showToast } from '@/lib/toast';
 import { normalizeErrorMessage } from '../../../shared/errors';
 import type { StorageMigrationProgress } from '../../../shared/storageMigration';
 import { DataMigrationProgress } from './DataMigrationProgress';
+import { useConfirm } from '@/components/ui/confirm-dialog';
 
 const INITIAL: StorageMigrationProgress = { phase: 'scanning', percent: 0, completedFiles: 0, totalFiles: 0 };
 export function StorageMigrationPrompt(): React.ReactElement {
   const { api, booted } = useBridge();
+  const confirm = useConfirm();
   const inspected = React.useRef(false);
   const alive = React.useRef(true);
   const [destination, setDestination] = React.useState('');
@@ -35,16 +37,22 @@ export function StorageMigrationPrompt(): React.ReactElement {
         const plan = await api.inspectStorageMigration!();
         if (plan?.deferred) { inspected.current = false; return; }
         if (!plan || !alive.current) return;
-        setDestination(plan.destination); await migrate();
-      } catch (error) { if (alive.current) showErrorToast('数据目录迁移未完成', error); }
+        setDestination(plan.destination);
+        const agreed = await confirm({
+          title: '迁移数据目录？',
+          body: `将默认 Trace、运行日志和备份移动到安装目录下的 ${plan.destination}。校验完成后才切换目录，已有自定义目录保留。选择稍后处理会继续使用当前位置。`,
+          confirmText: '迁移', cancelText: '稍后处理', size: 'wide'
+        });
+        if (agreed && alive.current) await migrate();
+      } catch (error) { if (alive.current) showErrorToast('无法检查数据目录', error); }
     };
     const observer = new MutationObserver(() => { void inspect(); });
     observer.observe(document.body, { childList: true, subtree: true });
     const timer = setInterval(() => { void inspect(); }, 2000);
     void inspect();
     return () => { clearInterval(timer); observer.disconnect(); };
-  }, [api, booted, migrate]);
-  return <DataMigrationProgress title={failure ? '数据迁移未完成' : '正在整理数据目录'} description={`Trace 和运行日志迁移至 ${destination}。校验完成后自动切换，配置和自定义目录保留。`} progress={progress} phase="正在迁移并校验数据">
+  }, [api, booted, confirm, migrate]);
+  return <DataMigrationProgress title={failure ? '数据迁移未完成' : '正在整理数据目录'} description={`Trace、运行日志和备份迁移至 ${destination}。校验完成后自动切换，配置和自定义目录保留。`} progress={progress} phase="正在迁移并校验数据">
     {failure && <><p className="provider-field-error" role="alert">{failure}</p><div className="data-migration-actions">
       <Button variant="outline" onClick={() => setProgress(null)}>稍后处理</Button>
       <Button variant="default" onClick={() => { void migrate(); }}>重试迁移</Button>

@@ -506,4 +506,5 @@ export interface GatewayClientRoute {
   readonly configDigest: string;
   readonly requiresTakeover: boolean;
   readonly configPaths: readonly string[];
+  readonly compatibilityNotice?: string | null;
 }

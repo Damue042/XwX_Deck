@@ -367,6 +367,15 @@ async fn pilot_rpc(
         return Err("操作只允许在主窗口发起".into());
     }
     let _rpc = core::admit_rpc(&method)?;
+    _rpc.run(pilot_rpc_inner(app, pilot, method, args)).await
+}
+
+async fn pilot_rpc_inner(
+    app: tauri::AppHandle,
+    pilot: tauri::State<'_, Shared>,
+    method: String,
+    args: Vec<Value>,
+) -> Result<Value, String> {
     let window = app.get_webview_window("main").ok_or("主窗口不存在")?;
     if let Some(result) = edition::rpc(&app, pilot.inner(), &method, &args).await {
         return result;
@@ -1417,6 +1426,10 @@ async fn pilot_smoke_report(
 async fn isolated_rpc(pilot: Shared, request: &Value) -> Result<Value, String> {
     let method = request["method"].as_str().unwrap_or("");
     let _rpc = core::admit_rpc(method)?;
+    _rpc.run(isolated_rpc_inner(pilot, request)).await
+}
+async fn isolated_rpc_inner(pilot: Shared, request: &Value) -> Result<Value, String> {
+    let method = request["method"].as_str().unwrap_or("");
     let args = request["args"].as_array().map(Vec::as_slice).unwrap_or(&[]);
     let input = args.first().cloned().unwrap_or(Value::Null);
     if let Some(result) = edition::isolated_rpc(&pilot, method, args).await {

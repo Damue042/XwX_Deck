@@ -16,6 +16,19 @@ pub(crate) fn installation_root() -> Option<PathBuf> {
     None
 }
 
+pub(crate) fn backup_storage_root() -> Option<PathBuf> {
+    if std::env::args().any(|a| matches!(a.as_str(), "--pilot-root" | "--data-root")) {
+        return None;
+    }
+    #[cfg(windows)]
+    return std::env::current_exe()
+        .ok()?
+        .parent()
+        .map(|p| p.join("XwXTrace"));
+    #[cfg(not(windows))]
+    None
+}
+
 pub(crate) fn prepare_directory(root: &Path, path: &Path) -> Result<PathBuf> {
     let base = validated_directory(root, path)?;
     credentials::private_permissions(&base, true)?;
@@ -134,6 +147,16 @@ impl Pilot {
         })
         .map(|(key, source, name)| (key.to_owned(), source, base.join(name)))
         .collect();
+        let backups = self.root.join("backups");
+        if backups.exists() && backups != base.join("backups") {
+            moves.push((String::new(), backups, base.join("backups")));
+        }
+        if let Some(previous) = previous.as_ref().filter(|path| *path != base) {
+            let backups = previous.join("backups");
+            if backups.exists() {
+                moves.push((String::new(), backups, base.join("backups")));
+            }
+        }
         let backup = self.root.join("legacy-data-backup");
         if backup.exists() {
             moves.push((String::new(), backup, base.join("legacy-data-backup")));

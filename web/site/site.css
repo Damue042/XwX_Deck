@@ -1,7 +1,7 @@
 /* Confirmed website layout, product preview and support marks. */
 /* Keep the actual application window and the original downstream sections. */
 body { isolation: isolate; }
-body > .hero-field { position: fixed; inset: 0; z-index: -1; opacity: .4; mask-image: none; -webkit-mask-image: none; }
+body > .hero-field { position: fixed; inset: 0; z-index: -1; opacity: 1; mask-image: none; -webkit-mask-image: none; }
 body > .hero-field .field { mask-image: radial-gradient(ellipse 42% 45% at 50% 30%, transparent 30%, #000 100%); -webkit-mask-image: radial-gradient(ellipse 42% 45% at 50% 30%, transparent 30%, #000 100%); }
 .hero#download { min-height: 420px; padding: 112px 0 40px; z-index: 2; }
 .hero#download h1 { font-family: var(--sans); font-size: clamp(2rem, 4.5vw, 3.5rem); font-weight: 450; line-height: 1.2; letter-spacing: -.025em; text-wrap: balance; }
@@ -32,7 +32,7 @@ body > .hero-field .field { mask-image: radial-gradient(ellipse 42% 45% at 50% 3
   .features .seg { display: flex; gap: 0; }
   .features .seg button { font-size: 12px; padding: 0 7px; }
   .demo-caption { font-size: 14px; margin-top: 18px; padding-inline: 6px; }
-  body > .hero-field { opacity: .32; }
+  body > .hero-field { opacity: 1; }
 }
 .language-picker { position: relative; }
 .language-picker[hidden], .language-menu[hidden] { display: none; }

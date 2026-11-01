@@ -404,9 +404,9 @@ export function SettingsPage({ active }: Props): React.ReactElement {
       title: t('重置 XwX Deck？'),
       body: (
         <span className="reset-confirm-copy">
-          <span>{t("将删除 XwX Deck 的设置、缓存、Trace 记录和运行日志，清空自定义 Trace、日志目录中的内容。")}</span>
+          <span>{t("将中断 XwX Deck 的后台任务和在途请求，删除设置、缓存、Trace 记录和运行日志，清空自定义 Trace、日志目录中的内容。")}</span>
           {bridge.runtime?.applicationResetArchives && <span>{t("重置前会归档备份；备份仍占用磁盘空间。完成后会重新启动应用。")}</span>}
-          <span className="reset-confirm-client-note">{t("勾选下面选项后，还会删除 Claude、ChatGPT／Codex 的核心配置。若客户端仍在运行，将弹窗询问是否强制关闭；未保存的工作会丢失。Skills、Agents 不受影响。")}</span>
+          <span className="reset-confirm-client-note">{t("勾选下面选项后，还会删除 Claude、ChatGPT／Codex 的核心配置。Skills、Agents 不受影响。")}</span>
         </span>
       ),
       checkboxLabel: t('同时删除 Claude 与 ChatGPT／Codex 的核心配置'),

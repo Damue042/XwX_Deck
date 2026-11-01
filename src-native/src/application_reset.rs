@@ -1,7 +1,8 @@
 //! Reset data is archived after the manager exits. The journal stays beside the
 //! data directory, so a crash never destroys the only copy of recovery state.
 use super::*;
-use std::io::Write;
+use sha2::{Digest, Sha256};
+use std::io::{Read, Write};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 struct Stamp {
@@ -17,7 +18,7 @@ struct Move {
 }
 static RPC: std::sync::Mutex<(usize, bool)> = std::sync::Mutex::new((0, false));
 static COMMITTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub(crate) struct RpcGuard(bool);
+pub(crate) struct RpcGuard(bool, bool);
 pub(super) fn admit_rpc(method: &str) -> Result<RpcGuard> {
     let mut state = RPC.lock().map_err(|_| "操作状态不可用")?;
     if state.1 {
@@ -25,14 +26,52 @@ pub(super) fn admit_rpc(method: &str) -> Result<RpcGuard> {
     }
     let reset = method == "resetApplication";
     if reset {
-        if state.0 != 0 {
-            return Err("后台操作仍在运行，请完成或取消后再次重置".into());
-        }
         state.1 = true;
     } else {
         state.0 += 1;
     }
-    Ok(RpcGuard(reset))
+    let interruptible = matches!(
+        method,
+        "fetchProviderModels"
+            | "fetchModels"
+            | "validateProvider"
+            | "checkForUpdates"
+            | "refreshSubscriptionUsage"
+            | "getOfficialChatgptResetCredits"
+            | "getOfficialChatgptAccount"
+            | "refreshMetadata"
+    );
+    Ok(RpcGuard(reset, interruptible))
+}
+impl RpcGuard {
+    /// Reset owns admission immediately. Drop pending network operations before
+    /// acquiring Pilot, so polling and slow remote services cannot block reset.
+    pub(crate) async fn run<T>(
+        &self,
+        operation: impl std::future::Future<Output = Result<T>>,
+    ) -> Result<T> {
+        if self.0 {
+            while RPC.lock().map_err(|_| "操作状态不可用")?.0 != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            operation.await
+        } else if !self.1 {
+            // Finish local transactions and lifecycle restoration at their safe
+            // boundary. They no longer reject reset or require another click.
+            operation.await
+        } else {
+            tokio::select! {
+                biased;
+                _ = async {
+                    loop {
+                        if RPC.lock().is_ok_and(|state| state.1) { break; }
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                } => Err("操作已中断，正在重置应用".into()),
+                result = operation => result,
+            }
+        }
+    }
 }
 impl Drop for RpcGuard {
     fn drop(&mut self) {
@@ -56,6 +95,8 @@ pub(crate) struct Job {
     isolated: bool,
     root_identity: Stamp,
     moves: Vec<Move>,
+    #[serde(default)]
+    empty_directories: Vec<(PathBuf, Stamp)>,
     client_files: Vec<(PathBuf, Stamp)>,
     executable: PathBuf,
     relaunch_args: Vec<String>,
@@ -88,10 +129,17 @@ fn stamp(path: &Path) -> Result<Stamp> {
     #[cfg(not(any(unix, windows)))]
     let identity = format!("{:?}", metadata.created().map_err(err)?);
     let sha256 = if metadata.is_file() {
-        if metadata.len() > 128 * 1024 * 1024 {
-            return Err("重置文件超过校验上限，保留原文件".into());
+        let mut input = fs::File::open(path).map_err(err)?;
+        let mut digest = Sha256::new();
+        let mut bytes = [0u8; 64 * 1024];
+        loop {
+            let size = input.read(&mut bytes).map_err(err)?;
+            if size == 0 {
+                break;
+            }
+            digest.update(&bytes[..size]);
         }
-        Some(storage::digest(&fs::read(path).map_err(err)?))
+        Some(format!("{:x}", digest.finalize()))
     } else {
         None
     };
@@ -108,7 +156,36 @@ fn private_directory(path: &Path) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(err)?;
     }
+    #[cfg(windows)]
+    credentials::private_permissions(path, true)?;
     Ok(())
+}
+fn plan_tree(job: &mut Job, source: &Path, destination: &Path) -> Result<()> {
+    if destination.starts_with(source) || source.starts_with(destination) {
+        return Err("重置备份位置与数据目录重叠，原文件已保留".into());
+    }
+    let captured = stamp(source)?;
+    if captured.directory {
+        private_directory(destination)?;
+        for entry in fs::read_dir(source).map_err(err)? {
+            let entry = entry.map_err(err)?;
+            plan_tree(job, &entry.path(), &destination.join(entry.file_name()))?;
+        }
+        job.empty_directories.push((source.to_path_buf(), captured));
+    } else {
+        job.moves.push(Move {
+            source: source.into(),
+            destination: destination.into(),
+            stamp: captured,
+        });
+    }
+    Ok(())
+}
+fn archived_stamp(path: &Path, expected: &Stamp) -> bool {
+    stamp(path).is_ok_and(|actual| {
+        actual == *expected
+            || !actual.directory && !expected.directory && actual.sha256 == expected.sha256
+    })
 }
 fn present(path: &Path) -> Result<bool> {
     match fs::symlink_metadata(path) {
@@ -167,7 +244,7 @@ fn exclusive_move(source: &Path, destination: &Path) -> Result<()> {
         }
         let source = move_path(source);
         let destination = move_path(destination);
-        if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 8) } == 0 {
+        if unsafe { MoveFileExW(source.as_ptr(), destination.as_ptr(), 10) } == 0 {
             return Err(err(std::io::Error::last_os_error()));
         }
         Ok(())
@@ -225,7 +302,9 @@ fn validate(job: &Job) -> Result<()> {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("");
-    if job.backup.parent() != job.root.parent()
+    let install_backups = data_storage::backup_storage_root().map(|base| base.join("backups"));
+    if (job.backup.parent() != job.root.parent()
+        && job.backup.parent() != install_backups.as_deref())
         || !name
             .strip_prefix("xwxdeck-reset-backup-")
             .is_some_and(|id| id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit()))
@@ -239,6 +318,15 @@ fn validate(job: &Job) -> Result<()> {
     }
     if job.moves.len() > 10_000 || job.client_files.len() > 4 {
         return Err("重置任务超过上限".into());
+    }
+    for (path, captured) in &job.empty_directories {
+        if !captured.directory
+            || path == &job.root
+            || job.root.starts_with(path)
+            || job.backup.starts_with(path)
+        {
+            return Err("重置目录清理范围无效，原目录已保留".into());
+        }
     }
     for item in &job.moves {
         let parent = item.source.parent().ok_or("无效重置来源")?;
@@ -269,7 +357,7 @@ fn rollback(job: &Job) -> Result<()> {
             continue;
         }
         if present(&item.source)?
-            || stamp(&item.destination).as_ref() != Ok(&item.stamp)
+            || !archived_stamp(&item.destination, &item.stamp)
             || exclusive_move(&item.destination, &item.source).is_err()
         {
             conflicts += 1;
@@ -288,20 +376,36 @@ fn archive(job: &Job) -> Result<()> {
     for item in &job.moves {
         match (present(&item.source)?, present(&item.destination)?) {
             (true, false) if stamp(&item.source)? == item.stamp => {}
-            (false, true) if stamp(&item.destination)? == item.stamp => {}
+            (false, true) if archived_stamp(&item.destination, &item.stamp) => {}
+            (true, true)
+                if !item.stamp.directory
+                    && stamp(&item.source)? == item.stamp
+                    && archived_stamp(&item.destination, &item.stamp) => {}
             _ => return Err("重置前文件或备份已被外部修改，两个版本保留，请检查后重试".into()),
         }
     }
     for (index, item) in job.moves.iter().enumerate() {
         if present(&item.destination)? {
+            if present(&item.source)? && !item.stamp.directory && stamp(&item.source)? == item.stamp
+            {
+                fs::remove_file(&item.source).map_err(err)?;
+            }
             continue;
         }
         if stamp(&item.source)? != item.stamp {
             return Err("重置过程中有外部修改，原文件保留".into());
         }
         exclusive_move(&item.source, &item.destination)?;
-        if stamp(&item.destination)? != item.stamp {
+        if !archived_stamp(&item.destination, &item.stamp) {
             return Err("归档时文件发生变化，保留恢复现场".into());
+        }
+        // Cross-volume MoveFileEx may report success while retaining an open
+        // source. Remove it only after checking both the copy and source again.
+        if present(&item.source)? {
+            if item.stamp.directory || stamp(&item.source)? != item.stamp {
+                return Err("归档来源已变化，两个版本已保留".into());
+            }
+            fs::remove_file(&item.source).map_err(err)?;
         }
         if job.isolated && job.test_pause && index == 0 && !job.backup.join("pause-used").exists() {
             write(
@@ -317,16 +421,22 @@ fn archive(job: &Job) -> Result<()> {
             }
         }
     }
+    for (path, captured) in &job.empty_directories {
+        // Remove only empty captured directories; external additions survive.
+        if stamp(path).as_ref() == Ok(captured) && same_physical_path(path).unwrap_or(false) {
+            let _ = fs::remove_dir(path);
+        }
+    }
     Ok(())
 }
 impl Pilot {
     pub(crate) async fn prepare_reset(&mut self, reset_clients: bool) -> Result<Job> {
-        self.subscriptions.assert_reset_idle().await?;
-        if matches!(
-            self.updates.state()["status"].as_str(),
-            Some("downloading" | "installing")
-        ) {
-            return Err("更新操作仍在运行，请先取消或完成后再次重置，数据保留".into());
+        self.subscriptions.cancel().await;
+        if matches!(self.updates.state()["status"].as_str(), Some("downloading")) {
+            self.updates.cancel()?;
+        }
+        if self.updates.state()["status"] == "installing" {
+            return Err("安装程序正在替换应用文件，完成后可重置；原数据保留".into());
         }
         if let Some(error) = self
             .settings_problem
@@ -383,11 +493,13 @@ impl Pilot {
         let mut nonce = [0; 16];
         getrandom::fill(&mut nonce).map_err(err)?;
         let nonce: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
-        let backup = self
-            .root
-            .parent()
-            .ok_or("无效数据目录")?
-            .join(format!("xwxdeck-reset-backup-{nonce}"));
+        let installed = data_storage::backup_storage_root();
+        let parent = if let Some(base) = &installed {
+            data_storage::prepare_directory(&self.root, &base.join("backups"))?
+        } else {
+            self.root.parent().ok_or("无效数据目录")?.to_path_buf()
+        };
+        let backup = parent.join(format!("xwxdeck-reset-backup-{nonce}"));
         private_directory(&backup)?;
         private_directory(&backup.join("data"))?;
         let mut job = Job {
@@ -398,6 +510,7 @@ impl Pilot {
             isolated: self.isolated,
             root_identity: stamp(&self.root)?,
             moves: vec![],
+            empty_directories: vec![],
             client_files: vec![],
             executable: std::env::current_exe().map_err(err)?,
             relaunch_args: std::env::args()
@@ -464,6 +577,11 @@ impl Pilot {
             {
                 continue;
             }
+            if installed.is_some() {
+                let destination = job.backup.join("data").join(&name);
+                plan_tree(&mut job, &path, &destination)?;
+                continue;
+            }
             job.moves.push(Move {
                 source: path.clone(),
                 destination: job.backup.join("data").join(name),
@@ -491,6 +609,11 @@ impl Pilot {
             }
         }
         for (index, path) in custom.iter().enumerate() {
+            if installed.is_some() {
+                let destination = job.backup.join(format!("custom-{index}"));
+                plan_tree(&mut job, path, &destination)?;
+                continue;
+            }
             let destination = path
                 .parent()
                 .unwrap()
@@ -770,6 +893,21 @@ pub(super) fn resume(path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn confirmed_reset_cancels_pending_rpc_and_drains_before_starting() {
+        let active = admit_rpc("fetchProviderModels").unwrap();
+        let pending =
+            tokio::spawn(async move { active.run(std::future::pending::<Result<()>>()).await });
+        let reset = admit_rpc("resetApplication").unwrap();
+        assert!(admit_rpc("getState").is_err());
+        tokio::time::timeout(Duration::from_secs(2), reset.run(async { Ok(()) }))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(pending.await.unwrap().unwrap_err().contains("中断"));
+        drop(reset);
+        assert!(admit_rpc("getState").is_ok());
+    }
     fn fixture() -> (PathBuf, Job) {
         let mut nonce = [0; 8];
         getrandom::fill(&mut nonce).unwrap();
@@ -799,6 +937,7 @@ mod tests {
                 destination: backup.join("data/settings.json"),
                 stamp: stamp(&source).unwrap(),
             }],
+            empty_directories: vec![],
             client_files: vec![],
             executable: std::env::current_exe().unwrap(),
             relaunch_args: vec![],

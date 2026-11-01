@@ -364,7 +364,7 @@ fn windows_permissions(path: &Path, extra_aces: &str) -> Result<bool> {
         LocalFree(sid_text.cast());
         value
     };
-    let sddl: Vec<u16> = format!("D:P(A;OICI;FA;;;{sid}){extra_aces}")
+    let sddl: Vec<u16> = format!("D:P{extra_aces}(A;OICI;FA;;;{sid})")
         .encode_utf16()
         .chain(Some(0))
         .collect();
@@ -414,10 +414,11 @@ fn windows_permissions(path: &Path, extra_aces: &str) -> Result<bool> {
         let (mut current_size, mut desired_size) = (AclSize::default(), AclSize::default());
         // Setting an inherited DACL propagates through existing descendants.
         // Compare the real descriptor every time; never cache a broader ACL.
+        let owner_matches =
+            status == 0 && !current_owner.is_null() && EqualSid(current_owner, user_sid) != 0;
         let matches = status == 0
             && valid
-            && !current_owner.is_null()
-            && EqualSid(current_owner, user_sid) != 0
+            && owner_matches
             && !current_dacl.is_null()
             && GetSecurityDescriptorControl(current_descriptor, &mut control, &mut revision) != 0
             && control & 0x1000 != 0
@@ -455,8 +456,12 @@ fn windows_permissions(path: &Path, extra_aces: &str) -> Result<bool> {
             SetNamedSecurityInfoW(
                 name.as_ptr(),
                 1,
-                0x80000005,
-                user_sid,
+                if owner_matches {
+                    0x80000004
+                } else {
+                    0x80000005
+                },
+                if owner_matches { null_mut() } else { user_sid },
                 null_mut(),
                 dacl,
                 null_mut(),
@@ -907,6 +912,158 @@ pub(super) struct CliHome {
     root: PathBuf,
     lease: Option<fs::File>,
     completed: bool,
+    #[cfg(windows)]
+    job: owned_cli_job::Job,
+}
+#[cfg(windows)]
+mod owned_cli_job {
+    use super::*;
+    use std::{
+        ffi::c_void,
+        os::windows::io::{AsRawHandle, FromRawHandle},
+    };
+    #[repr(C)]
+    #[derive(Default)]
+    struct BasicLimits {
+        user: i64,
+        job: i64,
+        flags: u32,
+        min: usize,
+        max: usize,
+        active: u32,
+        affinity: usize,
+        priority: u32,
+        scheduling: u32,
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct Limits {
+        basic: BasicLimits,
+        io: [u64; 6],
+        process: usize,
+        job: usize,
+        peak_process: usize,
+        peak_job: usize,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateJobObjectW(attributes: *const c_void, name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(
+            job: *mut c_void,
+            class: u32,
+            info: *const c_void,
+            size: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        fn TerminateJobObject(job: *mut c_void, code: u32) -> i32;
+        fn QueryInformationJobObject(
+            job: *mut c_void,
+            class: u32,
+            info: *mut c_void,
+            size: u32,
+            returned: *mut u32,
+        ) -> i32;
+    }
+    pub(super) struct Job(fs::File);
+    impl Job {
+        pub(super) fn new() -> Result<Self> {
+            let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if handle.is_null() {
+                return Err("无法创建授权进程隔离，未启动授权".into());
+            }
+            let job = Self(unsafe { fs::File::from_raw_handle(handle) });
+            let mut limits = Limits::default();
+            limits.basic.flags = 0x2000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if unsafe {
+                SetInformationJobObject(
+                    handle,
+                    9,
+                    (&limits as *const Limits).cast(),
+                    std::mem::size_of::<Limits>() as u32,
+                )
+            } == 0
+            {
+                return Err("无法设置授权进程隔离，未启动授权".into());
+            }
+            Ok(job)
+        }
+        pub(super) fn attach(&self, child: &tokio::process::Child) -> Result<()> {
+            let process = child.raw_handle().ok_or("授权进程已退出")?;
+            if unsafe { AssignProcessToJobObject(self.0.as_raw_handle(), process) } == 0 {
+                return Err("无法隔离授权子进程，已取消授权".into());
+            }
+            Ok(())
+        }
+        pub(super) fn stop(&self) -> bool {
+            unsafe {
+                TerminateJobObject(self.0.as_raw_handle(), 1);
+            }
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                // JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, ActiveProcesses at 40.
+                let mut accounting = [0u64; 6];
+                if unsafe {
+                    QueryInformationJobObject(
+                        self.0.as_raw_handle(),
+                        1,
+                        accounting.as_mut_ptr().cast(),
+                        48,
+                        std::ptr::null_mut(),
+                    )
+                } != 0
+                    && accounting[5] as u32 == 0
+                {
+                    return true;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[tokio::test]
+        async fn cancellation_stops_owned_process_tree() {
+            let job = Job::new().unwrap();
+            let mut command = tokio::process::Command::new("cmd.exe");
+            command.args(["/D", "/C", "ping.exe -n 60 127.0.0.1 >nul"]);
+            command.creation_flags(0x08000000);
+            let mut child = command.kill_on_drop(true).spawn().unwrap();
+            job.attach(&child).unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                let mut accounting = [0u64; 6];
+                let queried = unsafe {
+                    QueryInformationJobObject(
+                        job.0.as_raw_handle(),
+                        1,
+                        accounting.as_mut_ptr().cast(),
+                        48,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if queried != 0 && accounting[5] as u32 >= 2 {
+                    break;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "fixture descendant must join the owned job"
+                );
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            assert!(
+                job.stop(),
+                "all owned descendants must terminate before cleanup"
+            );
+            tokio::time::timeout(Duration::from_secs(5), child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
 }
 #[cfg(unix)]
 unsafe extern "C" {
@@ -963,6 +1120,8 @@ impl CliHome {
             root: root.into(),
             lease: Some(lease),
             completed: true,
+            #[cfg(windows)]
+            job: owned_cli_job::Job::new()?,
         };
         raw_write_new(
             &home.path.join(".xwxdeck-cli-owner"),
@@ -1011,6 +1170,8 @@ impl CliHome {
             .kill_on_drop(true)
             .spawn()
             .map_err(|_| "无法启动官方账号服务")?;
+        #[cfg(windows)]
+        self.job.attach(&child)?;
         self.completed = false;
         Ok(child)
     }
@@ -1038,6 +1199,8 @@ impl CliHome {
             .kill_on_drop(true)
             .spawn()
             .map_err(|_| "无法启动订阅刷新")?;
+        #[cfg(windows)]
+        self.job.attach(&child)?;
         self.completed = false;
         match tokio::time::timeout(timeout, child.wait()).await {
             Ok(result) => {
@@ -1057,6 +1220,10 @@ impl CliHome {
 }
 impl Drop for CliHome {
     fn drop(&mut self) {
+        #[cfg(windows)]
+        {
+            self.completed = self.job.stop();
+        }
         drop(self.lease.take());
         #[cfg(not(unix))]
         if !self.completed {
@@ -1765,6 +1932,11 @@ mod windows_permission_tests {
         fs::create_dir(&root).unwrap();
         windows_permissions(&root, "").unwrap();
         fs::write(root.join("child.json"), "synthetic retained child").unwrap();
+        assert!(windows_permissions(&root, "(D;OICI;WO;;;WD)").unwrap());
+        assert!(
+            windows_permissions(&root, "").unwrap(),
+            "an existing owner needs WRITE_DAC, not WRITE_OWNER, to repair a private ACL"
+        );
         assert!(
             !windows_permissions(&root, "").unwrap(),
             "correct ACL must not propagate again through every descendant"

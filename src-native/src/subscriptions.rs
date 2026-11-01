@@ -746,33 +746,6 @@ impl Accounts {
         }
         self.snapshot().await
     }
-    pub(super) async fn assert_reset_idle(&self) -> Result<()> {
-        let active = |status: &Value| {
-            matches!(
-                status.as_str(),
-                Some("waiting" | "exchanging" | "cancelled")
-            )
-        };
-        if self.inner.lock().await.flow.as_ref().is_some_and(|flow| {
-            ["waiting", "exchanging", "cancelled"].contains(&flow.status.as_str())
-        }) {
-            return Err("授权尚未完成；请完成授权，或取消后退出并重启应用，再重置".into());
-        }
-        for snapshot in [
-            self.official.snapshot().await,
-            self.grok.snapshot().await,
-            self.claude.snapshot().await,
-            self.copilot.snapshot().await,
-            self.cursor.snapshot().await,
-        ] {
-            if active(&snapshot["flow"]["status"]) {
-                return Err(
-                    "授权进程尚未确认退出；请完成授权，或取消后退出并重启应用，再重置".into(),
-                );
-            }
-        }
-        Ok(())
-    }
     async fn json(&self, response: reqwest::Response) -> Result<Value> {
         use futures_util::StreamExt;
         let status = response.status();

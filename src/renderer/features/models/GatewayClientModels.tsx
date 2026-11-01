@@ -25,6 +25,7 @@ export function GatewayClientModels({ client, active }: { client: DownloadClient
   const generation = React.useRef(0);
   const revision = React.useRef(0);
   const routeRead = React.useRef(0);
+  const compatibilitySeen = React.useRef('');
   const dirty = React.useRef(false);
   const mounted = React.useRef(true);
   const activeRef = React.useRef(active);
@@ -44,6 +45,10 @@ export function GatewayClientModels({ client, active }: { client: DownloadClient
       const value = await bridge.api.getClientRoute(client);
       if (!mounted.current || !activeRef.current || request !== routeRead.current || current !== revision.current || dirty.current) return;
       setRoute(value); setProvider(value.providerId); setModel(value.model || '');
+      if (value.compatibilityNotice && compatibilitySeen.current !== value.compatibilityNotice) {
+        compatibilitySeen.current = value.compatibilityNotice;
+        showToast(t('客户端需要更新'), 'warning', `client-compatibility:${client}`, { description: t(value.compatibilityNotice) });
+      }
       desired.current = { providerId: value.providerId, model: value.model || '' };
     } catch (error) {
       if (mounted.current && activeRef.current && request === routeRead.current && current === revision.current) showErrorToast(t('客户端配置读取失败'), error, `client-read:${client}`, {

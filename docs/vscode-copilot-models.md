@@ -12,6 +12,14 @@
 
 说明放在“模型服务”的悬停提示中，不增加常驻说明区。VS Code 的配置格式与功能范围见 [官方文档](https://code.visualstudio.com/docs/agent-customization/language-models#_add-a-custom-endpoint-model)。
 
+## 版本要求
+
+当前适配使用 `chatLanguageModels.json` 和 Custom Endpoint 模型组。Deck 要求 VS Code 1.122 或更新版本。检测不到支持的版本时，模型页通过 Toast 提醒更新 VS Code、Copilot Chat 并重载窗口。提醒不重复打断页签切换，也不覆盖已保存的模型选择。
+
+配置方式确实随版本演进。微软在 [2025 年 10 月的说明](https://code.visualstudio.com/blogs/2025/10/22/bring-your-own-key) 中仍将 OpenAI Compatible 标为 Insiders 功能。[当前文档](https://code.visualstudio.com/docs/agent-customization/language-models#_add-a-custom-endpoint-model) 已改用 Custom Endpoint，旧设置被弃用。因此，配置写入成功不代表旧客户端一定读取。
+
+此结论不能代替具体电脑的请求验收。公司网络、服务权限和 Copilot 扩展状态仍可能影响结果。
+
 ## 2026-10-27 验证
 
 - 3,000 个目录模型加 1 个手动模型完整生成，无截断；协议、能力、去重及过滤检查通过。

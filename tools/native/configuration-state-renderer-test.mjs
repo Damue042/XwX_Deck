@@ -25,15 +25,15 @@ let snapshot={supported:true,accounts:[
 const fixture={api:{setupWebsites:{},detectClientInstallations:async()=>installation,previewConfigurationImport:async()=>({sources:[]}),getSubscriptionAccounts:async()=>{if(readFailure)throw Error('读取暂时失败');return structuredClone(snapshot)}},modelClients:[],providers:{connections:[],active:{}},patch(){}};
 globalThis.__configurationStateFixture=fixture;
 const entry=resolve(base,'src/renderer/features/settings/AddConfigurationDialog.tsx');
-const bundled=await esbuild.build({stdin:{contents:"export {AddConfigurationDialog} from './src/renderer/features/settings/AddConfigurationDialog';export {SubscriptionAccountsPanel} from './src/renderer/features/settings/SubscriptionAccountsPanel';",resolveDir:base},bundle:true,platform:'node',format:'cjs',write:false,alias:{'@':resolve(base,'src/renderer')},external:['react','react/*','react-dom','react-dom/*'],plugins:[{name:'metadata-fixture',setup(build){
+const bundled=await esbuild.build({stdin:{contents:"export {AddConfigurationDialog} from './src/renderer/features/settings/AddConfigurationDialog';export {SubscriptionAccountsPanel} from './src/renderer/features/settings/SubscriptionAccountsPanel';export {StorageMigrationPrompt} from './src/renderer/features/settings/StorageMigrationPrompt';",resolveDir:base},bundle:true,platform:'node',format:'cjs',write:false,alias:{'@':resolve(base,'src/renderer')},external:['react','react/*','react-dom','react-dom/*'],plugins:[{name:'metadata-fixture',setup(build){
   build.onResolve({filter:/^@\/(bridge\/store|lib\/i18n|lib\/toast|components\/ui\/confirm-dialog)$/},args=>({path:args.path,namespace:'fixture'}));
   build.onResolve({filter:/^\.\/confirm-dialog$/},()=>({path:'@/components/ui/confirm-dialog',namespace:'fixture'}));
   build.onResolve({filter:/^\.\/(EnhancementsPanel|ImportConfigurations)$/},args=>args.importer===entry?{path:args.path,namespace:'empty'}:undefined);
   build.onLoad({filter:/.*/,namespace:'empty'},args=>({contents:`export const ${args.path.slice(2)}=()=>null;`}));
-  build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path.endsWith('store')?'export const useBridge=()=>globalThis.__configurationStateFixture':args.path.endsWith('i18n')?'export const t=s=>s;export const useLanguage=()=>{}':args.path.endsWith('confirm-dialog')?'export const useConfirm=()=>async()=>false':'export const showToast=()=>{};export const showErrorToast=()=>{};'}));
+  build.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:args.path.endsWith('store')?'export const useBridge=()=>globalThis.__configurationStateFixture':args.path.endsWith('i18n')?'export const t=s=>s;export const useLanguage=()=>{}':args.path.endsWith('confirm-dialog')?'export const useConfirm=()=>globalThis.__configurationStateFixture.confirm || (async()=>false)':'export const showToast=()=>{};export const showErrorToast=()=>{};'}));
 }}]});
 const mod={exports:{}};new Function('require','module','exports',bundled.outputFiles[0].text)(require,mod,mod.exports);
-const {AddConfigurationDialog,SubscriptionAccountsPanel}=mod.exports;
+const {AddConfigurationDialog,SubscriptionAccountsPanel,StorageMigrationPrompt}=mod.exports;
 const connection=(id,baseUrl,extra={})=>({id,displayName:id,baseUrl,bearerToken:'',adapter:'auto',codexApiFormat:'responses',codexModel:'',codexContextWindow:0,claudeModels:{},...extra});
 const connections=[connection('renamed-service','https://api.deepseek.com/v1'),connection('local','http://localhost:23456/v1',{providerPreset:'local-ollama'}),connection('plan','https://open.bigmodel.cn/api/v1',{providerPreset:'zhipu-coding-plan'}),connection('subscription','https://api.openai.com/v1',{subscriptionAccountId:'official-chatgpt'})];
 let root=createRoot(document.getElementById('root'));
@@ -139,4 +139,17 @@ try{
   snapshot={supported:true,accounts:[imported,{id:'another-official',platform:'chatgpt',status:'connected'}]};await renderPanel(false);await renderPanel(true);
   assert.equal(muted('[data-subscription-service="chatgpt"]'),false,'another connected account keeps its service configured');
   console.log('PASS typed imported source expiry, read failure and recovery; localized source messages do not decide readiness and confirmed expired cards stay selectable');
+
+  let migrateCalls=0,confirmCalls=0,agree=false,finishMigration;
+  fixture.booted=true;
+  fixture.api.inspectStorageMigration=async()=>({destination:'E:/Deck/XwXTrace'});
+  fixture.api.migrateStorage=()=>{migrateCalls++;return new Promise(resolve=>{finishMigration=resolve})};
+  fixture.confirm=async options=>{confirmCalls++;assert.ok(options.body.includes('E:/Deck/XwXTrace'));return agree};
+  await act(async()=>root.render(React.createElement(StorageMigrationPrompt,{key:'decline'})));await flush();
+  assert.equal(confirmCalls,1);assert.equal(migrateCalls,0);assert.equal(document.querySelector('#data-migration-dialog'),null);
+  agree=true;
+  await act(async()=>root.render(React.createElement(StorageMigrationPrompt,{key:'accept'})));await flush();
+  assert.equal(migrateCalls,1);assert.ok(document.querySelector('#data-migration-dialog'));
+  await act(async()=>finishMigration({}));await flush();assert.equal(document.querySelector('#data-migration-dialog'),null);
+  console.log('PASS storage relocation asks for consent and destination before progress; declining performs zero migration writes, accepting completes once');
 }finally{await act(async()=>root.unmount());dom.window.close();delete globalThis.__configurationStateFixture;}

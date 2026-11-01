@@ -16,6 +16,7 @@ pub(crate) struct Metadata {
     gate: Arc<Mutex<()>>,
     stopped: Arc<AtomicBool>,
     stop: Arc<tokio::sync::Notify>,
+    interrupt: Arc<tokio::sync::Notify>,
 }
 fn test_argument(name: &str) -> Option<String> {
     std::env::args()
@@ -75,6 +76,7 @@ impl Metadata {
             gate: Arc::new(Mutex::new(())),
             stopped: Arc::new(AtomicBool::new(false)),
             stop: Arc::new(tokio::sync::Notify::new()),
+            interrupt: Arc::new(tokio::sync::Notify::new()),
         })
     }
     pub fn shutdown(&self) {
@@ -82,6 +84,7 @@ impl Metadata {
         self.stop.notify_waiters();
     }
     pub async fn pause(&self) -> tokio::sync::OwnedMutexGuard<()> {
+        self.interrupt.notify_waiters();
         self.gate.clone().lock_owned().await
     }
     pub fn state(&self) -> Value {
@@ -132,7 +135,11 @@ impl Metadata {
     }
     pub async fn refresh(&self, shared: Shared, event: Value) -> Result<Value> {
         let _gate = self.gate.lock().await;
-        self.refresh_locked(shared, event).await
+        tokio::select! {
+            biased;
+            _ = self.interrupt.notified() => Err("元数据刷新已中断，正在重置应用".into()),
+            result = self.refresh_locked(shared, event) => result,
+        }
     }
     pub async fn repair(&self, shared: Shared) -> Result<Value> {
         // Refresh takes this gate before Pilot. Drain an earlier writer and

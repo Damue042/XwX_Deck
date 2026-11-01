@@ -5,6 +5,7 @@ interface Props {
   readonly scale?: number;
   readonly dotSize?: number;
   readonly active?: boolean;
+  readonly paused?: boolean;
   /** Extra drift for surfaces that want a visibly flowing field (onboarding). 0 keeps the Trace look. */
   readonly flow?: number;
 }
@@ -75,7 +76,7 @@ function isDay(): boolean {
 
 function pageIsActive(canvas: HTMLCanvasElement): boolean {
   // The onboarding surface hosts its own field outside the page stack.
-  return !document.hidden && (!isDesktop() || (document.hasFocus() && document.documentElement.dataset.nativeWindowActive !== 'false')) && !!canvas.closest('.page.current, [data-field-host]');
+  return canvas.dataset.motion !== 'paused' && !document.hidden && (!isDesktop() || (document.hasFocus() && document.documentElement.dataset.nativeWindowActive !== 'false')) && !!canvas.closest('.page.current, [data-field-host]');
 }
 
 function animate(
@@ -117,6 +118,7 @@ function animate(
   window.addEventListener('focus', sync);
   window.addEventListener('blur', sync);
   window.addEventListener('xwx:native-window-focus', sync);
+  canvas.addEventListener('xwx:field-motion', sync);
   // Keep a complete still frame when a desktop window opens without focus.
   render(performance.now());
   sync();
@@ -126,6 +128,7 @@ function animate(
     window.removeEventListener('focus', sync);
     window.removeEventListener('blur', sync);
     window.removeEventListener('xwx:native-window-focus', sync);
+    canvas.removeEventListener('xwx:field-motion', sync);
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
     canvas.dataset.rendering = 'paused';
@@ -399,9 +402,10 @@ function init2D(canvas: HTMLCanvasElement, density: number, flow: number, dotSiz
   };
 }
 
-export const ParticleField = React.memo(function ParticleField({ scale = 60, flow = 0, dotSize = 1, active = true }: Props): React.ReactElement {
+export const ParticleField = React.memo(function ParticleField({ scale = 60, flow = 0, dotSize = 1, active = true, paused = false }: Props): React.ReactElement {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const [force2D, setForce2D] = React.useState(isDesktop);
+  React.useEffect(() => { canvasRef.current?.dispatchEvent(new Event('xwx:field-motion')); }, [paused]);
 
   React.useEffect(() => {
     const canvas = canvasRef.current;
@@ -427,6 +431,7 @@ export const ParticleField = React.memo(function ParticleField({ scale = 60, flo
       ref={canvasRef}
       className="field"
       data-scale={scale}
+      data-motion={paused ? 'paused' : 'running'}
       aria-hidden="true"
     />
   );

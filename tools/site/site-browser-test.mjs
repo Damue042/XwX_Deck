@@ -118,6 +118,11 @@ try {
     assert.equal(await page.locator('#download-options').getAttribute('open'), null);
     assert.equal(await page.locator('#download-options > summary').evaluate(node => node === document.activeElement), true);
     assert.equal(await page.locator('#community [data-download]').count(), 0);
+    const field = page.locator('#hero-field canvas');
+    assert.equal(await field.getAttribute('data-scale'), '60');
+    await page.waitForFunction(() => document.querySelector('#hero-field canvas')?.dataset.motion === 'paused');
+    assert.ok(await field.evaluate(canvas => canvas.width > 1 && canvas.height > 1), 'reduced motion retains a full-size dot field');
+    assert.equal(await page.locator('#hero-field').evaluate(host => getComputedStyle(host).opacity), '1', 'website preserves the product field opacity');
     if (process.env.XWX_SITE_TEST_SCREENSHOT_DIR) {
       await mkdir(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, { recursive: true });
       await page.screenshot({ path: join(process.env.XWX_SITE_TEST_SCREENSHOT_DIR, `public-site-hero-${width}.png`), fullPage: false });

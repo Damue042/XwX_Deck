@@ -31,6 +31,12 @@ const flush=time=>{const callbacks=[...frames.values()];frames.clear();for(const
 try{
   await act(async()=>root.render(createElement(module.exports.ParticleField)));
   const canvas=document.querySelector('canvas');
+  await act(async()=>root.render(createElement(module.exports.ParticleField,{paused:true})));
+  assert.equal(frames.size,0);assert.equal(canvas.width,100,'explicitly paused field keeps its bitmap');
+  const stillPaints=paints;flush(90);assert.equal(paints,stillPaints);
+  await act(async()=>root.render(createElement(module.exports.ParticleField,{paused:false})));
+  assert.equal(frames.size,1,'resuming schedules one animation loop');
+
   assert.equal(frames.size,1);flush(100);assert.ok(paints>0);
   focused=false;dom.window.dispatchEvent(new Event('blur'));assert.equal(frames.size,0);assert.equal(canvas.dataset.rendering,'paused');
   const paused=paints;flush(200);assert.equal(paints,paused);

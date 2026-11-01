@@ -7,22 +7,14 @@
 <p align="center">管理 AI 客户端的模型连接，看清每一次请求。</p>
 
 <p align="center">
-  <a href="https://xwxdeck.com">官网</a>&nbsp;&nbsp;&nbsp;
-  <a href="https://xwxdeck.com/docs/">文档</a>&nbsp;&nbsp;&nbsp;
+  <a href="https://xwxdeck.com/#download">下载</a>&nbsp;&nbsp;&nbsp;
   <a href="https://xwxdeck.com/?demo=dashboard#experience">在线体验</a>&nbsp;&nbsp;&nbsp;
-  <a href="https://xwxdeck.com/#download">下载</a>
+  <a href="https://xwxdeck.com/docs/">使用文档</a>
 </p>
 
-本次发行范围为 Windows x64 安装版、便携版和 Apple Silicon Mac。
-暂不提供 Intel Mac 安装包。
-具体文件与验收边界见[发布平台范围](docs/maintenance/release-platform-scope-20261030.md)。
+支持 Windows x64 安装版、便携版和 Apple Silicon Mac。
 
 [![XwX Deck 仪表盘：请求、Token、费用与耗时](assets/github/trace-preview.png)](https://xwxdeck.com/?demo=dashboard#experience)
-
-<p align="center">
-  <a href="https://xwxdeck.com/?demo=dashboard#experience">体验仪表盘</a>&nbsp;&nbsp;&nbsp;
-  <a href="https://xwxdeck.com/?demo=models#experience">体验模型管理</a>
-</p>
 
 ## 一个地方，管理连接与请求
 
@@ -34,28 +26,12 @@ XwX Deck 配合已有 AI 客户端使用。配置模型连接，按需开启 Tra
 | 请求追踪 | 查看请求、响应、工具调用、Token、参考费用与耗时。 |
 | 本地管理 | 管理保存在本机的设置与记录，自行选择存储容量和清理方式。 |
 
-[了解功能与范围](https://xwxdeck.com/docs/about)
 
 ## 下载
 
-首个正式版本 `1.0.0` 尚未发布。
-安装包、校验文件和稳定更新清单将在最终验收完成后提供。
-当前官网不提供正式下载链接。
-正式发布后，从 [官网下载入口](https://xwxdeck.com/#download) 获取以下三种制品。
+从顶部下载入口获取 Windows x64 安装版、便携版或 Apple Silicon Mac 版本。官网同时提供文件校验与安装说明。自动更新清单独立维护。
 
-| 平台与安装方式 | 文件名 | 当前状态 |
-| --- | --- | --- |
-| Windows x64 安装版 | `XwX-Deck-windows-x64-setup.exe` | 待发布。 |
-| Windows x64 便携版 | `XwX-Deck-windows-x64.exe` | 待发布。 |
-| macOS Apple Silicon | `XwX-Deck-mac-arm64.dmg` | 待发布。 |
-
-官网通过 Cloudflare 分发安装包，版本目录为 `download.xwxdeck.com/releases/v1.0.0/`。
-GitHub 仅维护 [公开源码](https://github.com/Damue042/XwX_Deck)，不作为本次制品下载源。
-隔离候选不作为正式下载入口。
-
-[安装与更新说明](https://xwxdeck.com/docs/download)
-
-Windows 按用户 Setup 的构建、数据保留和升级验收见 [Windows 安装说明](docs/windows-setup.md)。
+安装包通过官网和 Cloudflare 分发，GitHub 维护公开源码。安装与更新步骤统一收录于使用文档。
 
 ## 三步开始
 
@@ -67,24 +43,17 @@ Windows 按用户 Setup 的构建、数据保留和升级验收见 [Windows 安�
 
 新安装的服务列表为空。导入保留来源文件，不会自动切换服务。
 
-[阅读快速开始](https://xwxdeck.com/docs/)
+## 帮助与反馈
 
-## 文档与帮助
-
-| 配置与使用 | 记录与维护 |
-| --- | --- |
-| [服务与配置](https://xwxdeck.com/docs/connections) | [Trace 与用量](https://xwxdeck.com/docs/trace-and-usage) |
-| [模型与客户端](https://xwxdeck.com/docs/models-and-clients) | [设置与本地数据](https://xwxdeck.com/docs/settings-and-data) |
-| [账号与服务切换](https://xwxdeck.com/docs/accounts-and-switching) | [常见问题](https://xwxdeck.com/docs/troubleshooting) |
-
-遇到问题可 [提交 Issue](https://github.com/Damue042/XwX_Deck/issues)。安全漏洞请使用 [私密报告渠道](.github/SECURITY.md)。
+使用文档覆盖连接配置、客户端接入、Trace、账号管理和本地数据维护。
+遇到问题可 [提交 Issue](https://github.com/Damue042/XwX_Deck/issues)。
+安全漏洞请使用 [私密报告渠道](.github/SECURITY.md)。
 
 ## 开发与贡献
 
 后端采用 Rust/Tauri，前端采用 React 和 TypeScript。
 
 - [开发说明](docs/development.md)：环境、运行与验证入口。
-- [工程文档](docs/README.md)：架构、产品要求与维护记录。
 - [贡献指南](.github/CONTRIBUTING.md)：问题反馈与代码贡献。
 
 ## 许可与数据

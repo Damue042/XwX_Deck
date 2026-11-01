@@ -7,16 +7,17 @@ import { join, basename } from 'node:path';
 import { spawn,spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { nativeTestBinary } from './test-support.mjs';
 
 const sandbox=await mkdtemp(join(await realpath(tmpdir()),'xwxdeck-reset-'));
 const env={...process.env,XWX_DECK_TEST_SECURE_STORE:'1'}, checks=[], children=[];
-let child,queue=[];
+let child,queue=new Map(),requestSequence=0;
 const exists=async path=>access(path).then(()=>true,()=>false);
 async function wait(check,label){for(let i=0;i<200;i++){const result=await check();if(result)return result;await new Promise(resolve=>setTimeout(resolve,50));}throw Error('timeout '+label);}
-function start(root,extra=[]){queue=[];child=spawn(nativeTestBinary,['--rpc','--pilot-root',root,'--reset-test-no-relaunch',...extra],{env,stdio:['pipe','pipe','pipe']});children.push(child);createInterface({input:child.stdout}).on('line',line=>queue.shift()?.(JSON.parse(line)));child.stderr.resume();return child;}
-async function call(method,...args){return new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error(method+' timed out')),20000);queue.push(value=>{clearTimeout(timer);resolve(value)});child.stdin.write(JSON.stringify({method,args})+'\n');});}
+function start(root,extra=[]){queue=new Map();child=spawn(nativeTestBinary,['--rpc','--pilot-root',root,'--reset-test-no-relaunch',...extra],{env,stdio:['pipe','pipe','pipe']});children.push(child);createInterface({input:child.stdout}).on('line',line=>{const value=JSON.parse(line);const resolve=queue.get(value.requestId);queue.delete(value.requestId);resolve?.(value)});child.stderr.resume();return child;}
+async function call(method,...args){return new Promise((resolve,reject)=>{const requestId=++requestSequence;const timer=setTimeout(()=>reject(Error(method+' timed out')),20000);queue.set(requestId,value=>{clearTimeout(timer);resolve(value)});child.stdin.write(JSON.stringify({requestId,method,args})+'\n');});}
 async function rpc(method,...args){const result=await call(method,...args);assert.equal(result.ok,true,result.error);return result.result;}
 async function stop(){const exited=once(child,'exit');child.stdin.end();assert.equal((await exited)[0],0);}
 async function reset(root,option){const exited=once(child,'exit');const result=await rpc('resetApplication',{resetClientConfigs:option});assert.equal((await exited)[0],0);return result;}
@@ -41,6 +42,21 @@ async function exportBackup(backup,destination){const run=spawnSync(nativeTestBi
 const pass=label=>{checks.push(label);console.log('PASS '+label);};
 let report={passed:false,checks,isolatedFixtures:true};
 try{
+
+  const busyRoot=join(sandbox,'busy-catalog');await seed(busyRoot);
+  let catalogRequested,disconnected;
+  const requestSeen=new Promise(resolve=>{catalogRequested=resolve}),connectionClosed=new Promise(resolve=>{disconnected=resolve});
+  const upstream=createServer((request,response)=>{request.on('close',disconnected);catalogRequested();});
+  upstream.listen(0,'127.0.0.1');await once(upstream,'listening');
+  try {
+    await rpc('saveProvider',{id:'reset-slow',displayName:'Slow local catalog',baseUrl:`http://127.0.0.1:${upstream.address().port}/v1`,bearerToken:'SYNTHETIC-RESET-ONLY',adapter:'responses'});
+    const pendingCatalog=call('fetchProviderModels',{providerId:'reset-slow'});
+    await requestSeen;
+    await reset(busyRoot,false);
+    const cancelled=await pendingCatalog;assert.equal(cancelled.ok,false);assert.match(cancelled.error,/中断/);
+    await connectionClosed;assert.equal((await result(busyRoot)).status,'completed');
+    pass('one confirmed reset interrupts a hanging local catalog, closes its connection and completes without a second user action');
+  } finally { upstream.closeAllConnections();await new Promise(resolve=>upstream.close(resolve)); }
   const root=join(sandbox,'keep-clients'),{preserved,core}=await seed(root);
   const before=await readFile(join(root,'settings.json'));
   const resetResult=await reset(root,false), completed=await result(root);assert.equal(completed.status,'completed');

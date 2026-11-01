@@ -708,8 +708,15 @@ impl Pilot {
             .gateway
             .as_ref()
             .map(|g| format!("http://127.0.0.1:{}/clients/{id}", g.port));
+        let compatibility_notice = if id == "vscode"
+            && !self.client_discovery().management_supported(id)
+        {
+            Some("未检测到支持当前模型配置格式的 VS Code。请更新至 1.122 或更新版本，并更新 Copilot Chat、重载窗口后重试。")
+        } else {
+            None
+        };
         Ok(
-            json!({"client":id,"providerId":route["providerId"],"model":route["model"],"enabled":route["enabled"]!=false,"automatic":automatic_client(id),"baseUrl":url,"configDigest":format!("{:x}",hash.finalize()),"requiresTakeover":external&&!owned,"configPaths":paths}),
+            json!({"client":id,"providerId":route["providerId"],"model":route["model"],"enabled":route["enabled"]!=false,"automatic":automatic_client(id),"baseUrl":url,"configDigest":format!("{:x}",hash.finalize()),"requiresTakeover":external&&!owned,"configPaths":paths,"compatibilityNotice":compatibility_notice}),
         )
     }
     fn plan_client(&self, id: &str, port: u16, route: &Value) -> Result<Vec<Value>> {

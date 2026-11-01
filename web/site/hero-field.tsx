@@ -27,7 +27,7 @@ if (host) {
       const timer = setTimeout(() => setFrozen(true), 240);
       return () => clearTimeout(timer);
     }, [reduced, mode, visible]);
-    return <ParticleField scale={110} dotSize={0.62} flow={0.08} active={visible && !frozen && mode !== 'off'} />;
+    return <ParticleField flow={0.08} active={visible && mode !== 'off'} paused={frozen} />;
   }
   createRoot(host).render(<HeroField />);
 }

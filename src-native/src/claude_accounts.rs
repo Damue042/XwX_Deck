@@ -27,6 +27,7 @@ struct Flow {
     error: String,
     account_id: String,
     cancel: tokio::sync::watch::Sender<bool>,
+    finished: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 #[derive(Clone)]
 pub(super) struct ClaudeAccounts {
@@ -239,15 +240,18 @@ impl ClaudeAccounts {
         json!({"accounts":rows,"installed":self.executable().is_some(),"flow":flow.as_ref().map(|f|json!({"id":f.id,"platform":"claude","status":f.status,"error":f.error,"accountId":f.account_id}))})
     }
     pub async fn cancel(&self) {
-        if let Some(flow) = self
-            .flow
-            .lock()
-            .await
-            .as_mut()
-            .filter(|f| f.status == "waiting" || f.status == "exchanging")
-        {
-            flow.status = "cancelled".into();
-            let _ = flow.cancel.send(true);
+        let finished = {
+            let mut state = self.flow.lock().await;
+            state.as_mut().and_then(|flow| {
+                if flow.status == "waiting" || flow.status == "exchanging" {
+                    flow.status = "cancelled".into();
+                    let _ = flow.cancel.send(true);
+                }
+                flow.finished.take()
+            })
+        };
+        if let Some(finished) = finished {
+            let _ = finished.await;
         }
     }
     pub async fn authorization_url(&self) -> Result<String> {
@@ -340,6 +344,7 @@ impl ClaudeAccounts {
             .spawn()
             .map_err(|_| "无法启动 Claude Code 官方登录")?;
         let (cancel, mut cancelled) = tokio::sync::watch::channel(false);
+        let (finished, completion) = tokio::sync::oneshot::channel();
         let flow_id = random_id()?;
         *self.flow.lock().await = Some(Flow {
             id: flow_id.clone(),
@@ -348,10 +353,12 @@ impl ClaudeAccounts {
             error: String::new(),
             account_id: String::new(),
             cancel,
+            finished: Some(completion),
         });
         let (url_tx, url_rx) = tokio::sync::oneshot::channel();
         let engine = self.clone();
         tokio::spawn(async move {
+            let _finished = finished;
             let (lines_tx, mut lines_rx) = tokio::sync::mpsc::channel::<String>(16);
             for stream in [
                 child

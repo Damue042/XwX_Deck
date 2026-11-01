@@ -54,7 +54,9 @@ fn restore_state(kind: &str, valid: bool, target_safe: bool, active: bool) -> &'
 }
 impl Pilot {
     pub(super) fn backup_root(&self) -> PathBuf {
-        self.root.join("backups")
+        data_storage::backup_storage_root()
+            .unwrap_or_else(|| self.root.clone())
+            .join("backups")
     }
     pub(super) fn save_backup(
         &self,
@@ -129,9 +131,19 @@ impl Pilot {
                 });
             }
         }
-        if let Some(parent) = self
+        let mut parents = self
             .root
             .parent()
+            .map(Path::to_path_buf)
+            .into_iter()
+            .collect::<Vec<_>>();
+        if let Some(base) = data_storage::backup_storage_root() {
+            parents.push(base.join("backups"));
+        }
+        parents.sort();
+        parents.dedup();
+        for parent in parents
+            .into_iter()
             .filter(|p| same_physical_path(p).unwrap_or(false))
         {
             for entry in fs::read_dir(parent).map_err(err)? {

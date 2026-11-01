@@ -57,6 +57,7 @@ struct State {
     flow: Value,
     url: String,
     cancel: Option<tokio::sync::watch::Sender<bool>>,
+    finished: Option<tokio::sync::oneshot::Receiver<()>>,
 }
 #[derive(Clone)]
 pub(super) struct OfficialAccounts {
@@ -422,15 +423,18 @@ impl OfficialAccounts {
             return Err("官方登录地址无法识别，请更新 Codex CLI".into());
         }
         let (cancel, mut cancelled) = tokio::sync::watch::channel(false);
+        let (finished, completion) = tokio::sync::oneshot::channel();
         {
             let mut state = self.state.lock().await;
             state.flow = json!({"id":login_id,"platform":"chatgpt","authKind":"official","status":"waiting"});
             state.url = url;
             state.cancel = Some(cancel);
+            state.finished = Some(completion);
         }
         let accounts = self.clone();
         let target = target.to_string();
         tokio::spawn(async move {
+            let _finished = finished;
             let result = tokio::select! {
                 _=cancelled.changed()=>Err("登录已取消".into()),
                 result=tokio::time::timeout(Duration::from_secs(600),async {
@@ -515,10 +519,16 @@ impl OfficialAccounts {
         }
     }
     pub async fn cancel(&self) {
-        let mut state = self.state.lock().await;
-        if let Some(cancel) = state.cancel.take() {
-            state.flow["status"] = json!("cancelled");
-            let _ = cancel.send(true);
+        let finished = {
+            let mut state = self.state.lock().await;
+            if let Some(cancel) = state.cancel.take() {
+                state.flow["status"] = json!("cancelled");
+                let _ = cancel.send(true);
+            }
+            state.finished.take()
+        };
+        if let Some(finished) = finished {
+            let _ = finished.await;
         }
     }
     pub async fn sign_out(&self, id: &str, expected_account_key: Option<&str>) -> Result<Value> {
