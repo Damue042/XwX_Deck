@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { containsPrivateIdentifier } from './privacy-identifiers.mjs';
+import { ciWorkflowFailures } from '../../.github/scripts/ci-contract.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const workflowRoot = path.join(root, '.github', 'workflows');
@@ -64,11 +65,12 @@ check(releaseWorkflow.jobs['release-draft']?.if === "github.event_name == 'push'
 check(JSON.stringify(releaseWorkflow.jobs.macos?.strategy?.matrix?.include) === JSON.stringify([{os:'macos-15',arch:'arm64'}]), 'current Mac candidates must build Apple Silicon only');
 check(releaseWorkflow.jobs['release-draft'].needs.includes('macos'), 'draft assembly must wait for all Mac candidates');
 const ciWorkflow = parse(await readFile(path.join(workflowRoot, 'ci.yml'), 'utf8'));
+for (const failure of ciWorkflowFailures(ciWorkflow)) failures.push(`ci: ${failure}`);
 check(JSON.stringify(ciWorkflow.jobs['platform-compile'].strategy.matrix.os)===JSON.stringify(['windows-latest','macos-15']), 'current CI must validate Windows x64 and Apple Silicon');
 for (const [name, workflow] of [['ci', ciWorkflow], ['release', releaseWorkflow]]) {
   for (const job of Object.values(workflow.jobs)) {
     for (const step of job.steps ?? []) if (step.uses?.startsWith('actions/cache/restore@')) {
-      check(step.with.key.includes('runner.arch'), `${name}: native caches must distinguish architectures`);
+      check(name === 'ci' ? step.with.key === '${{ steps.cache-key.outputs.key }}' : step.with.key.includes('runner.arch'), `${name}: native caches must distinguish architectures`);
     }
   }
 }

@@ -16,6 +16,7 @@
     "compile": "npm run check-types && npm run check:docs && npm run check:icons && npm run check:release-contract && npm run check:runtime-boundary && npm run check:shared-parity && node tools/build/esbuild.config.mjs && npm run check:repository",
     "check-types": "tsc --noEmit",
     "check:quality": "node tools/checks/check-quality.mjs",
+    "check:ci": "node --test .github/scripts/ci-contract-test.mjs && node tools/checks/check-github-workflows.mjs",
     "check:docs": "node tools/checks/check-docs.mjs",
     "check:test-plan": "node tools/checks/check-test-plan.mjs",
     "check:release-contract": "node tools/checks/check-release-contract.mjs",

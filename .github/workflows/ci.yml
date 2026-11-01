@@ -15,14 +15,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate source
+  preflight:
+    name: Fast source checks
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Node.js
@@ -34,29 +36,124 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Check CI cache and failure contracts
+        run: node --test .github/scripts/ci-contract-test.mjs
 
-      - name: Install Linux native prerequisites
+      - name: Check documentation and test index
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-
-      - name: Compile and run core tests
-        run: |
-          npm test
+          npm run check:docs
           npm run check:test-plan
-
-      - name: Build documentation
-        run: npm run docs:build
+          npm run check:runtime-boundary
 
       - name: Validate public boundary and workflows
         run: |
           npm run check:public-boundary
           npm run check:workflows
 
+  validate:
+    name: Validate source
+    needs: preflight
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Require successful preflight
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
+        run: |
+          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ]; then
+            echo "::error::Preflight did not pass ($PREFLIGHT_RESULT); source checks were not run."
+            exit 1
+          fi
+
+      - name: Check out repository
+        if: ${{ success() && !cancelled() }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        if: ${{ success() && !cancelled() }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        if: ${{ success() && !cancelled() }}
+        run: npm ci
+
+      - name: Set up Rust
+        if: ${{ success() && !cancelled() }}
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Identify quality cache
+        if: ${{ success() && !cancelled() }}
+        id: cache-key
+        run: node .github/scripts/ci-cache-identity.mjs quality-debug
+
+      - name: Cache Rust dependencies
+        if: ${{ success() && !cancelled() }}
+        id: native-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: ${{ steps.cache-key.outputs.restore-key }}
+
+      - name: Install Linux native prerequisites
+        if: ${{ success() && !cancelled() }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      - name: Compile and run core tests
+        if: ${{ success() && !cancelled() }}
+        id: quality
+        run: |
+          npm test
+          npm run check:test-plan
+
+      - name: Build documentation
+        if: ${{ success() && !cancelled() }}
+        id: docs
+        run: npm run docs:build
+
+      - name: Save compiled Rust dependencies
+        if: ${{ !cancelled() && steps.quality.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Verify source completion state
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          QUALITY_RESULT: ${{ steps.quality.outcome }}
+          DOCS_RESULT: ${{ steps.docs.outcome }}
+        run: |
+          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ] || [ "$QUALITY_RESULT" != "success" ] || [ "$DOCS_RESULT" != "success" ]; then
+            echo "::error::Source verification failed, was cancelled, or did not run completely."
+            exit 1
+          fi
+
   platform-compile:
     name: Compile on ${{ matrix.os }}
+    needs: preflight
+    if: ${{ always() }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -66,24 +163,47 @@ jobs:
           - windows-latest
           - macos-15
     steps:
+      - name: Require successful preflight
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
+        run: |
+          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ]; then
+            echo "::error::Preflight did not pass ($PREFLIGHT_RESULT); native checks were not run."
+            exit 1
+          fi
+
       - name: Check out repository
+        if: ${{ success() && !cancelled() }}
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Node.js
+        if: ${{ success() && !cancelled() }}
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
       - name: Install dependencies
+        if: ${{ success() && !cancelled() }}
         run: npm ci
 
       - name: Set up Rust
+        if: ${{ success() && !cancelled() }}
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Identify isolated release cache
+        if: ${{ success() && !cancelled() }}
+        id: cache-key
+        run: node .github/scripts/ci-cache-identity.mjs isolated-release
+
       - name: Cache Rust dependencies
+        if: ${{ success() && !cancelled() }}
         id: native-cache
         uses: actions/cache/restore@v4
         with:
@@ -91,23 +211,17 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             test-results/native-target
-          key: ${{ runner.os }}-${{ runner.arch }}-native-rust-${{ hashFiles('src-native/Cargo.lock') }}
+          key: ${{ steps.cache-key.outputs.key }}
+          restore-keys: ${{ steps.cache-key.outputs.restore-key }}
 
       - name: Compile native candidate
+        if: ${{ success() && !cancelled() }}
+        id: native-build
         run: npm run build:rust:pilot
 
-      - name: Save compiled Rust dependencies
-        if: steps.native-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            test-results/native-target
-          key: ${{ steps.native-cache.outputs.cache-primary-key }}
-
       - name: Repeat Windows private-file and reset regressions
-        if: runner.os == 'Windows'
+        id: windows-regressions
+        if: ${{ success() && !cancelled() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
           foreach ($round in 1..3) {
@@ -116,16 +230,92 @@ jobs:
           }
 
       - name: Run isolated backend tests
+        if: ${{ success() && !cancelled() }}
+        id: backend
         run: npm run test:rust:backend
 
       - name: Verify native WebView interactions
-        if: runner.os == 'macOS'
+        id: webview
+        if: ${{ success() && !cancelled() && runner.os == 'macOS' }}
         run: node tools/native/native-test.mjs
 
       - name: Save Windows regression diagnostics
-        if: always() && runner.os == 'Windows'
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4
         with:
           name: windows-regression-diagnostics
           path: test-results/windows-*.log
           if-no-files-found: ignore
+
+      - name: Save compiled Rust dependencies
+        if: ${{ !cancelled() && steps.native-build.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            test-results/native-target
+          key: ${{ steps.cache-key.outputs.key }}
+
+      - name: Verify platform completion state
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          BUILD_RESULT: ${{ steps.native-build.outcome }}
+          BACKEND_RESULT: ${{ steps.backend.outcome }}
+          WINDOWS_REPEAT_RESULT: ${{ steps.windows-regressions.outcome }}
+          MAC_WEBVIEW_RESULT: ${{ steps.webview.outcome }}
+        run: |
+          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ] || [ "$BUILD_RESULT" != "success" ] || [ "$BACKEND_RESULT" != "success" ]; then
+            echo "::error::Native verification failed, was cancelled, or did not run completely."
+            exit 1
+          fi
+          case "$RUNNER_OS" in
+            Windows) [ "$WINDOWS_REPEAT_RESULT" = "success" ] || exit 1 ;;
+            macOS) [ "$MAC_WEBVIEW_RESULT" = "success" ] || exit 1 ;;
+            *) echo "::error::Unknown native platform"; exit 1 ;;
+          esac
+
+  summary:
+    name: CI verification summary
+    needs: [preflight, validate, platform-compile]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Report verification states without masking failures
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          SOURCE_RESULT: ${{ needs.validate.result }}
+          PLATFORM_RESULT: ${{ needs.platform-compile.result }}
+          WORKFLOW_CANCELLED: ${{ cancelled() }}
+        run: |
+          failed=0
+          report() {
+            case "$2" in
+              success) state=pass ;;
+              failure) state=fail; failed=1 ;;
+              cancelled) state=cancel; failed=1 ;;
+              skipped) state=not-run; failed=1 ;;
+              *) state=unknown; failed=1 ;;
+            esac
+            printf '| %s | %s |\n' "$1" "$state"
+          }
+          {
+            printf '## CI verification\n\n| Check | State |\n| --- | --- |\n'
+            report preflight "$PREFLIGHT_RESULT"
+            report source "$SOURCE_RESULT"
+            report platforms "$PLATFORM_RESULT"
+            if [ "$WORKFLOW_CANCELLED" != "false" ]; then
+              case "$WORKFLOW_CANCELLED" in true) state=cancel ;; *) state=unknown ;; esac
+              printf '| workflow | %s |\n' "$state"
+              failed=1
+            fi
+            printf '\nWindows WebView interactions are not run by this existing CI matrix; macOS WebView verification remains required.\n'
+            printf 'Isolated CI does not replace signed packages, installation, real authorization or update recovery acceptance.\n'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$failed"

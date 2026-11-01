@@ -224,6 +224,7 @@
 
 | 脚本 | 执行入口 | 关联编号 |
 | --- | --- | --- |
+| [ci-contract-test.mjs](../.github/scripts/ci-contract-test.mjs) | 独立专题入口 | RE01 |
 | [macos-update-validation-test.mjs](../tools/native/macos-update-validation-test.mjs) | 独立专题入口 | RE03、RE04、RE05 |
 | [nightly-schedule-test.mjs](../tools/native/nightly-schedule-test.mjs) | 独立专题入口 | RE02、RE03、RE04 |
 | [portable-update-test.mjs](../tools/native/portable-update-test.mjs) | 后端默认入口 | RE02、RE03、RE04、RE05 |
