@@ -1665,6 +1665,13 @@ impl Pilot {
                 .as_ref()
                 .map(|l| text(l, "before"))
                 .unwrap_or(&before))?;
+            if let Some(previous) = previous.as_ref() {
+                legacy_codex::rebase_external_direct_fields(
+                    &mut baseline,
+                    &doc(&before)?,
+                    previous,
+                )?;
+            }
             // The exact original remains in the takeover backup. The routing
             // baseline must not resurrect a repaired dead root on later switches.
             if takeover {
