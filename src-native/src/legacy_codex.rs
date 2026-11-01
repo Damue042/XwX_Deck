@@ -732,12 +732,17 @@ mod direct_tests {
             current["unrelated"] = value(true);
             let previous = json!({"managed":managed.to_string()});
             rebase_external_direct_fields(&mut baseline, &current, &previous).unwrap();
-            assert!(baseline.get("unrelated").is_none(), "do not adopt the whole document");
+            assert!(
+                baseline.get("unrelated").is_none(),
+                "do not adopt the whole document"
+            );
             let next = json!({"before":baseline.to_string(),"managed":current.to_string(),"providerId":"xwx_deck","providerIds":["xwx_deck"]});
             release_direct_fields(&mut current, &next).unwrap();
             assert_eq!(current["model"].as_str(), Some("official"));
             assert_eq!(
-                current.get("model_auto_compact_token_limit").and_then(Item::as_integer),
+                current
+                    .get("model_auto_compact_token_limit")
+                    .and_then(Item::as_integer),
                 expected
             );
             assert_eq!(current["unrelated"].as_bool(), Some(true));
