@@ -62,9 +62,9 @@ jobs:
         shell: bash
         env:
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          JOB_STATUS: ${{ job.status }}
         run: |
-          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ]; then
+          if [ "$JOB_STATUS" != "success" ] || [ "$PREFLIGHT_RESULT" != "success" ]; then
             echo "::error::Preflight did not pass ($PREFLIGHT_RESULT); source checks were not run."
             exit 1
           fi
@@ -141,11 +141,11 @@ jobs:
         shell: bash
         env:
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          JOB_STATUS: ${{ job.status }}
           QUALITY_RESULT: ${{ steps.quality.outcome }}
           DOCS_RESULT: ${{ steps.docs.outcome }}
         run: |
-          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ] || [ "$QUALITY_RESULT" != "success" ] || [ "$DOCS_RESULT" != "success" ]; then
+          if [ "$JOB_STATUS" != "success" ] || [ "$PREFLIGHT_RESULT" != "success" ] || [ "$QUALITY_RESULT" != "success" ] || [ "$DOCS_RESULT" != "success" ]; then
             echo "::error::Source verification failed, was cancelled, or did not run completely."
             exit 1
           fi
@@ -168,9 +168,9 @@ jobs:
         shell: bash
         env:
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          JOB_STATUS: ${{ job.status }}
         run: |
-          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ]; then
+          if [ "$JOB_STATUS" != "success" ] || [ "$PREFLIGHT_RESULT" != "success" ]; then
             echo "::error::Preflight did not pass ($PREFLIGHT_RESULT); native checks were not run."
             exit 1
           fi
@@ -262,13 +262,13 @@ jobs:
         shell: bash
         env:
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          JOB_STATUS: ${{ job.status }}
           BUILD_RESULT: ${{ steps.native-build.outcome }}
           BACKEND_RESULT: ${{ steps.backend.outcome }}
           WINDOWS_REPEAT_RESULT: ${{ steps.windows-regressions.outcome }}
           MAC_WEBVIEW_RESULT: ${{ steps.webview.outcome }}
         run: |
-          if [ "$WORKFLOW_CANCELLED" != "false" ] || [ "$PREFLIGHT_RESULT" != "success" ] || [ "$BUILD_RESULT" != "success" ] || [ "$BACKEND_RESULT" != "success" ]; then
+          if [ "$JOB_STATUS" != "success" ] || [ "$PREFLIGHT_RESULT" != "success" ] || [ "$BUILD_RESULT" != "success" ] || [ "$BACKEND_RESULT" != "success" ]; then
             echo "::error::Native verification failed, was cancelled, or did not run completely."
             exit 1
           fi
@@ -292,7 +292,7 @@ jobs:
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
           SOURCE_RESULT: ${{ needs.validate.result }}
           PLATFORM_RESULT: ${{ needs.platform-compile.result }}
-          WORKFLOW_CANCELLED: ${{ cancelled() }}
+          JOB_STATUS: ${{ job.status }}
         run: |
           failed=0
           report() {
@@ -310,9 +310,9 @@ jobs:
             report preflight "$PREFLIGHT_RESULT"
             report source "$SOURCE_RESULT"
             report platforms "$PLATFORM_RESULT"
-            if [ "$WORKFLOW_CANCELLED" != "false" ]; then
-              case "$WORKFLOW_CANCELLED" in true) state=cancel ;; *) state=unknown ;; esac
-              printf '| workflow | %s |\n' "$state"
+            if [ "$JOB_STATUS" != "success" ]; then
+              case "$JOB_STATUS" in cancelled) state=cancel ;; failure) state=fail ;; *) state=unknown ;; esac
+              printf '| summary job | %s |\n' "$state"
               failed=1
             fi
             printf '\nWindows WebView interactions are not run by this existing CI matrix; macOS WebView verification remains required.\n'

@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import test from 'node:test';
 import {parse} from 'yaml';
 import {cacheIdentity, dependencyManifest} from './ci-cache-identity.mjs';
-import {ciWorkflowFailures} from './ci-contract.mjs';
+import {ciWorkflowFailures, statusFunctionContextFailures} from './ci-contract.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const workflow = parse(await readFile(resolve(root, '.github/workflows/ci.yml'), 'utf8'));
@@ -69,14 +69,36 @@ test('workflow keeps full coverage on every path and guards existing required jo
   }
 });
 
+test('status functions are accepted only in GitHub-supported job/step if contexts', () => {
+  assert.deepEqual(statusFunctionContextFailures(workflow), []);
+  for (const fn of ['cancelled','always','success','failure']) {
+    const expression = `\${{ ${fn}() }}`;
+    assert.deepEqual(statusFunctionContextFailures({jobs:{check:{if:expression,steps:[{if:expression}]}}}), []);
+    for (const location of ['env','run','with','name','job-env','job-name','outputs','workflow-env']) {
+      const step = {run:'echo checked'};
+      const value = {jobs:{check:{steps:[step]}}};
+      if (location === 'job-env') value.jobs.check.env = {INVALID:expression};
+      else if (location === 'job-name') value.jobs.check.name = expression;
+      else if (location === 'outputs') value.jobs.check.outputs = {invalid:expression};
+      else if (location === 'workflow-env') value.env = {INVALID:expression};
+      else step[location] = ['env','with'].includes(location) ? {INVALID:expression} : expression;
+      assert.equal(statusFunctionContextFailures(value).length, 1, `${fn}/${location}`);
+    }
+  }
+  assert.deepEqual(statusFunctionContextFailures({jobs:{check:{steps:[{env:{JOB_STATUS:'${{ job.status }}',LABEL:"${{ format('cancelled()') }}"},run:'echo cancelled()'}]}}}), []);
+  const invalidOriginal = structuredClone(workflow);
+  invalidOriginal.jobs.validate.steps[0].env.JOB_STATUS = '${{ cancelled() }}';
+  assert.ok(ciWorkflowFailures(invalidOriginal).some(message=>message.includes('status functions are only supported')));
+});
+
 test('upstream failure/cancel/skip/unknown does not start expensive work or pass required guards', () => {
   for (const name of ['validate','platform-compile']) {
     assert.equal(workflow.jobs[name].if, '${{ always() }}');
     const gate = workflow.jobs[name].steps[0];
     for (const result of ['success','failure','cancelled','skipped','','unexpected']) {
-      for (const cancelled of ['true','false','','unknown']) {
-        const run = runShell(gate.run, {PREFLIGHT_RESULT:result,WORKFLOW_CANCELLED:cancelled});
-        assert.equal(run.status, result === 'success' && cancelled === 'false' ? 0 : 1, `${name}: ${result}/${cancelled}`);
+      for (const status of ['success','failure','cancelled','','unknown']) {
+        const run = runShell(gate.run, {PREFLIGHT_RESULT:result,JOB_STATUS:status});
+        assert.equal(run.status, result === 'success' && status === 'success' ? 0 : 1, `${name}: ${result}/${status}`);
       }
     }
   }
@@ -85,11 +107,12 @@ test('upstream failure/cancel/skip/unknown does not start expensive work or pass
 test('completion guards reject cancellation after the first guard and every missing mandatory step', () => {
   for (const [name, extra] of [['validate',{QUALITY_RESULT:'success',DOCS_RESULT:'success'}], ['platform-compile',{BUILD_RESULT:'success',BACKEND_RESULT:'success',WINDOWS_REPEAT_RESULT:'success',MAC_WEBVIEW_RESULT:'success'}]]) {
     const final = workflow.jobs[name].steps.at(-1);
-    const baseEnv = {PREFLIGHT_RESULT:'success',WORKFLOW_CANCELLED:'false',RUNNER_OS:'Windows',...extra};
+    const baseEnv = {PREFLIGHT_RESULT:'success',JOB_STATUS:'success',RUNNER_OS:'Windows',...extra};
     assert.equal(runShell(final.run, baseEnv).status, 0);
-    assert.equal(runShell(final.run, {...baseEnv,WORKFLOW_CANCELLED:'true'}).status, 1);
-    assert.equal(runShell(final.run, {...baseEnv,WORKFLOW_CANCELLED:''}).status, 1);
-    assert.equal(runShell(final.run, {...baseEnv,WORKFLOW_CANCELLED:'unknown'}).status, 1);
+    assert.equal(runShell(final.run, {...baseEnv,JOB_STATUS:'failure'}).status, 1);
+    assert.equal(runShell(final.run, {...baseEnv,JOB_STATUS:'cancelled'}).status, 1);
+    assert.equal(runShell(final.run, {...baseEnv,JOB_STATUS:''}).status, 1);
+    assert.equal(runShell(final.run, {...baseEnv,JOB_STATUS:'unknown'}).status, 1);
     for (const key of ['PREFLIGHT_RESULT',...Object.keys(extra)]) {
       // Windows does not run Mac WebView; Mac does not repeat Windows-only suites.
       const os = key === 'MAC_WEBVIEW_RESULT' ? 'macOS' : 'Windows';
@@ -139,7 +162,7 @@ test('always-run summary reports actual fail/cancel/not-run/unknown and cannot g
   const summary = workflow.jobs.summary.steps[0];
   assert.equal(workflow.jobs.summary.if, '${{ always() }}');
   assert.equal(workflow.jobs.summary.steps.length, 1, 'Cancellation reporting must not fetch sources or install tools');
-  const baseEnv = {PREFLIGHT_RESULT:'success',SOURCE_RESULT:'success',PLATFORM_RESULT:'success',WORKFLOW_CANCELLED:'false',GITHUB_STEP_SUMMARY:file.replaceAll('\\','/')};
+  const baseEnv = {PREFLIGHT_RESULT:'success',SOURCE_RESULT:'success',PLATFORM_RESULT:'success',JOB_STATUS:'success',GITHUB_STEP_SUMMARY:file.replaceAll('\\','/')};
   const labels = {success:'pass',failure:'fail',cancelled:'cancel',skipped:'not-run',waived:'unknown','':'unknown'};
   try {
     for (const [result,label] of Object.entries(labels)) for (const key of ['PREFLIGHT_RESULT','SOURCE_RESULT','PLATFORM_RESULT']) {
@@ -148,9 +171,9 @@ test('always-run summary reports actual fail/cancel/not-run/unknown and cannot g
       assert.ok((await readFile(file,'utf8')).includes(`| ${label} |`));
       await unlink(file);
     }
-    for (const cancelled of ['true','','unknown']) {
-      assert.equal(runShell(summary.run, {...baseEnv,WORKFLOW_CANCELLED:cancelled}).status, 1);
-      assert.ok((await readFile(file,'utf8')).includes(`| workflow | ${cancelled === 'true' ? 'cancel' : 'unknown'} |`));
+    for (const status of ['failure','cancelled','','unknown']) {
+      assert.equal(runShell(summary.run, {...baseEnv,JOB_STATUS:status}).status, 1);
+      assert.ok((await readFile(file,'utf8')).includes(`| summary job | ${status === 'cancelled' ? 'cancel' : status === 'failure' ? 'fail' : 'unknown'} |`));
       await unlink(file);
     }
   } finally { await unlink(file).catch(error=>{if(error.code!=='ENOENT')throw error;});await rmdir(directory); }

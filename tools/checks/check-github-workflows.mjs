@@ -2,7 +2,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { parse } from 'yaml';
 import { containsPrivateIdentifier } from './privacy-identifiers.mjs';
-import { ciWorkflowFailures } from '../../.github/scripts/ci-contract.mjs';
+import { ciWorkflowFailures, statusFunctionContextFailures } from '../../.github/scripts/ci-contract.mjs';
 
 const root = path.resolve(import.meta.dirname, '../..');
 const workflowRoot = path.join(root, '.github', 'workflows');
@@ -23,6 +23,7 @@ for (const entry of await readdir(workflowRoot, { withFileTypes: true })) {
   }
   check(workflow && typeof workflow === 'object', `${entry.name}: workflow must be an object`);
   check(workflow?.jobs && typeof workflow.jobs === 'object', `${entry.name}: jobs are required`);
+  for (const failure of statusFunctionContextFailures(workflow)) failures.push(`${entry.name}: ${failure}`);
   check(!Object.hasOwn(workflow ?? {}, 'pull_request_target'),
     `${entry.name}: pull_request_target is not allowed for this public repository`);
   check(!containsPrivateIdentifier(content), `${entry.name}: contains a private identifier`);

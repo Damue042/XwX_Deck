@@ -1,5 +1,29 @@
-export function ciWorkflowFailures(workflow) {
+// Status functions are special: GitHub permits them only in job/step `if`.
+// Step env/run/with support the job context, but not cancelled()/always()/etc.
+// https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability
+export function statusFunctionContextFailures(workflow) {
   const failures = [];
+  function visit(value, path = []) {
+    if (typeof value === 'string') {
+      const isIf = path.length === 3 && path[0] === 'jobs' && path[2] === 'if'
+        || path.length === 5 && path[0] === 'jobs' && path[2] === 'steps' && path[4] === 'if';
+      for (const match of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+        // Quoted string literals may contain function-like text without calling it.
+        const expression = match[1].replace(/'(?:[^']|'')*'/g, "''");
+        if (!isIf && /\b(?:always|cancelled|success|failure)\s*\(/i.test(expression)) {
+          failures.push(`${path.join('.')}: status functions are only supported in job/step if`);
+        }
+      }
+    } else if (value && typeof value === 'object') {
+      for (const [key, child] of Object.entries(value)) visit(child, [...path, key]);
+    }
+  }
+  visit(workflow);
+  return failures;
+}
+
+export function ciWorkflowFailures(workflow) {
+  const failures = statusFunctionContextFailures(workflow);
   const check = (ok, message) => { if (!ok) failures.push(message); };
   const job = workflow?.jobs ?? {};
   const runs = value => (value?.steps ?? []).map(step => step.run ?? '').join('\n');
@@ -17,8 +41,8 @@ export function ciWorkflowFailures(workflow) {
     check(job[name]?.needs === 'preflight' && job[name]?.if === '${{ always() }}', `${name}: required status guards must run after failed or cancelled preflight`);
     const gate = steps(name)[0];
     check(gate?.if === '${{ always() }}' && gate?.shell === 'bash' && gate?.env?.PREFLIGHT_RESULT === '${{ needs.preflight.result }}'
-      && gate.env.WORKFLOW_CANCELLED === '${{ cancelled() }}'
-      && gate.run.includes('[ "$PREFLIGHT_RESULT" != "success" ]') && gate.run.includes('[ "$WORKFLOW_CANCELLED" != "false" ]') && gate.run.includes('exit 1'), `${name}: first step must fail on non-successful preflight or cancellation`);
+      && gate.env.JOB_STATUS === '${{ job.status }}'
+      && gate.run.includes('[ "$PREFLIGHT_RESULT" != "success" ]') && gate.run.includes('[ "$JOB_STATUS" != "success" ]') && gate.run.includes('exit 1'), `${name}: first step must fail on non-successful preflight or cancellation`);
     for (const step of steps(name)) {
       if (step.name === 'Require successful preflight' || step.name.startsWith('Verify ') && step.name.endsWith(' completion state') || step.uses?.startsWith('actions/cache/save@') || step.name === 'Save Windows regression diagnostics') continue;
       const platform = step.id === 'webview' ? " && runner.os == 'macOS'" : step.id === 'windows-regressions' ? " && runner.os == 'Windows'" : '';
@@ -51,7 +75,7 @@ export function ciWorkflowFailures(workflow) {
   check(steps('platform-compile').some(step => step.id === 'windows-regressions' && step.run?.includes('foreach ($round in 1..3)')), 'Keep all three Windows private/reset regression rounds');
   for (const [name, fields] of [['validate', {QUALITY_RESULT:'${{ steps.quality.outcome }}',DOCS_RESULT:'${{ steps.docs.outcome }}'}], ['platform-compile', {BUILD_RESULT:'${{ steps.native-build.outcome }}',BACKEND_RESULT:'${{ steps.backend.outcome }}',WINDOWS_REPEAT_RESULT:'${{ steps.windows-regressions.outcome }}',MAC_WEBVIEW_RESULT:'${{ steps.webview.outcome }}'}]]) {
     const final = steps(name).at(-1);
-    check(final?.if === '${{ always() }}' && final.shell === 'bash' && final.env?.WORKFLOW_CANCELLED === '${{ cancelled() }}', `${name}: final completion guard must run even if cancellation happens after the first guard`);
+    check(final?.if === '${{ always() }}' && final.shell === 'bash' && final.env?.JOB_STATUS === '${{ job.status }}', `${name}: final completion guard must run even if cancellation happens after the first guard`);
     for (const [field, expression] of Object.entries(fields)) check(final?.env?.[field] === expression && final.run?.includes(`$${field}`), `${name}: completion guard must inspect actual ${field}`);
     check(final?.env?.PREFLIGHT_RESULT === '${{ needs.preflight.result }}' && final.run?.includes('exit 1'), `${name}: incomplete verification must fail`);
   }
@@ -60,7 +84,7 @@ export function ciWorkflowFailures(workflow) {
   check(steps('platform-compile').find(step => step.uses?.startsWith('actions/upload-artifact@'))?.if === "${{ !cancelled() && runner.os == 'Windows' }}", 'Cancelled old runs must not keep uploading diagnostics');
   check(JSON.stringify(job.summary?.needs) === JSON.stringify(['preflight','validate','platform-compile']) && job.summary?.if === '${{ always() }}', 'Summary must run after every upstream result, including cancellation');
   const summary = steps('summary')[0];
-  check(steps('summary').length === 1 && summary?.if === '${{ always() }}' && summary?.shell === 'bash' && !summary.uses && summary.env?.WORKFLOW_CANCELLED === '${{ cancelled() }}', 'Always-run summary must only report statuses, without source checkout/setup');
+  check(steps('summary').length === 1 && summary?.if === '${{ always() }}' && summary?.shell === 'bash' && !summary.uses && summary.env?.JOB_STATUS === '${{ job.status }}', 'Always-run summary must only report statuses, without source checkout/setup');
   check(summary?.env?.PREFLIGHT_RESULT === '${{ needs.preflight.result }}' && summary.env.SOURCE_RESULT === '${{ needs.validate.result }}' && summary.env.PLATFORM_RESULT === '${{ needs.platform-compile.result }}', 'Summary must inspect every actual upstream result');
   check(summary?.run?.includes('exit "$failed"'), 'Summary must propagate non-successful status');
   return failures;
