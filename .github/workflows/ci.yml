@@ -285,6 +285,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Reject cancelled verification
+        id: cancellation-guard
+        if: ${{ cancelled() }}
+        shell: bash
+        run: exit 1
+
       - name: Report verification states without masking failures
         if: ${{ always() }}
         shell: bash
@@ -293,6 +299,7 @@ jobs:
           SOURCE_RESULT: ${{ needs.validate.result }}
           PLATFORM_RESULT: ${{ needs.platform-compile.result }}
           JOB_STATUS: ${{ job.status }}
+          CANCELLATION_GUARD_RESULT: ${{ steps.cancellation-guard.outcome }}
         run: |
           failed=0
           report() {
@@ -310,6 +317,11 @@ jobs:
             report preflight "$PREFLIGHT_RESULT"
             report source "$SOURCE_RESULT"
             report platforms "$PLATFORM_RESULT"
+            if [ "$CANCELLATION_GUARD_RESULT" != "skipped" ]; then
+              case "$CANCELLATION_GUARD_RESULT" in failure|cancelled) state=cancel ;; *) state=unknown ;; esac
+              printf '| cancellation guard | %s |\n' "$state"
+              failed=1
+            fi
             if [ "$JOB_STATUS" != "success" ]; then
               case "$JOB_STATUS" in cancelled) state=cancel ;; failure) state=fail ;; *) state=unknown ;; esac
               printf '| summary job | %s |\n' "$state"

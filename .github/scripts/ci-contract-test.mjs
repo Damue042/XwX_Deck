@@ -141,7 +141,8 @@ test('workflow regressions cannot bypass builds, native checks, cache identity o
     w => { w.jobs.validate.steps.find(s=>s.uses?.startsWith('actions/cache/restore@')).with.path += '\n~/.codex'; },
     w => { w.jobs.validate.steps.find(s=>s.uses?.startsWith('actions/cache/restore@')).with['restore-keys'] = 'legacy-cache-'; },
     w => { w.jobs.summary.steps.at(-1).run = 'echo passed'; },
-    w => { delete w.jobs.summary.steps[0].if; },
+    w => { delete w.jobs.summary.steps.at(-1).if; },
+    w => { w.jobs.summary.steps.shift(); },
     w => { w.jobs.validate['continue-on-error'] = true; },
     w => { w.jobs['platform-compile'].steps.find(s=>s.id==='backend').if = false; },
     w => { w.jobs['platform-compile'].steps.find(s=>s.id==='windows-regressions').if = false; },
@@ -159,10 +160,13 @@ test('workflow regressions cannot bypass builds, native checks, cache identity o
 test('always-run summary reports actual fail/cancel/not-run/unknown and cannot go green on cancellation', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'xwx-ci-status-'));
   const file = join(directory, 'summary.md');
-  const summary = workflow.jobs.summary.steps[0];
+  const cancellation = workflow.jobs.summary.steps[0];
+  const summary = workflow.jobs.summary.steps.at(-1);
   assert.equal(workflow.jobs.summary.if, '${{ always() }}');
-  assert.equal(workflow.jobs.summary.steps.length, 1, 'Cancellation reporting must not fetch sources or install tools');
-  const baseEnv = {PREFLIGHT_RESULT:'success',SOURCE_RESULT:'success',PLATFORM_RESULT:'success',JOB_STATUS:'success',GITHUB_STEP_SUMMARY:file.replaceAll('\\','/')};
+  assert.equal(workflow.jobs.summary.steps.length, 2, 'Cancellation reporting must not fetch sources or install tools');
+  assert.equal(cancellation.if, '${{ cancelled() }}');
+  assert.equal(runShell(cancellation.run, {}).status, 1, 'The legal cancelled() sentinel must fail if it is selected');
+  const baseEnv = {PREFLIGHT_RESULT:'success',SOURCE_RESULT:'success',PLATFORM_RESULT:'success',JOB_STATUS:'success',CANCELLATION_GUARD_RESULT:'skipped',GITHUB_STEP_SUMMARY:file.replaceAll('\\','/')};
   const labels = {success:'pass',failure:'fail',cancelled:'cancel',skipped:'not-run',waived:'unknown','':'unknown'};
   try {
     for (const [result,label] of Object.entries(labels)) for (const key of ['PREFLIGHT_RESULT','SOURCE_RESULT','PLATFORM_RESULT']) {
@@ -174,6 +178,13 @@ test('always-run summary reports actual fail/cancel/not-run/unknown and cannot g
     for (const status of ['failure','cancelled','','unknown']) {
       assert.equal(runShell(summary.run, {...baseEnv,JOB_STATUS:status}).status, 1);
       assert.ok((await readFile(file,'utf8')).includes(`| summary job | ${status === 'cancelled' ? 'cancel' : status === 'failure' ? 'fail' : 'unknown'} |`));
+      await unlink(file);
+    }
+    // Every upstream job and the local job status can still be successful when
+    // workflow cancellation selects the explicit cancelled() sentinel.
+    for (const outcome of ['failure','cancelled','success','','unknown']) {
+      assert.equal(runShell(summary.run, {...baseEnv,CANCELLATION_GUARD_RESULT:outcome}).status, 1);
+      assert.ok((await readFile(file,'utf8')).includes(`| cancellation guard | ${['failure','cancelled'].includes(outcome) ? 'cancel' : 'unknown'} |`));
       await unlink(file);
     }
   } finally { await unlink(file).catch(error=>{if(error.code!=='ENOENT')throw error;});await rmdir(directory); }

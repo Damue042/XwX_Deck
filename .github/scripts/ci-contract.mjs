@@ -83,8 +83,11 @@ export function ciWorkflowFailures(workflow) {
   check(saveIndex > steps('platform-compile').indexOf(native), 'Report functional failures before waiting for cache upload');
   check(steps('platform-compile').find(step => step.uses?.startsWith('actions/upload-artifact@'))?.if === "${{ !cancelled() && runner.os == 'Windows' }}", 'Cancelled old runs must not keep uploading diagnostics');
   check(JSON.stringify(job.summary?.needs) === JSON.stringify(['preflight','validate','platform-compile']) && job.summary?.if === '${{ always() }}', 'Summary must run after every upstream result, including cancellation');
-  const summary = steps('summary')[0];
-  check(steps('summary').length === 1 && summary?.if === '${{ always() }}' && summary?.shell === 'bash' && !summary.uses && summary.env?.JOB_STATUS === '${{ job.status }}', 'Always-run summary must only report statuses, without source checkout/setup');
+  const cancellation = steps('summary')[0];
+  check(cancellation?.id === 'cancellation-guard' && cancellation.if === '${{ cancelled() }}' && cancellation.shell === 'bash' && cancellation.run === 'exit 1', 'Summary must reject workflow cancellation even when every upstream job succeeded');
+  const summary = steps('summary').at(-1);
+  check(steps('summary').length === 2 && summary?.if === '${{ always() }}' && summary?.shell === 'bash' && !summary.uses && summary.env?.JOB_STATUS === '${{ job.status }}', 'Always-run summary must only guard cancellation and report statuses, without source checkout/setup');
+  check(summary?.env?.CANCELLATION_GUARD_RESULT === '${{ steps.cancellation-guard.outcome }}' && summary.run?.includes('[ "$CANCELLATION_GUARD_RESULT" != "skipped" ]'), 'Summary must propagate cancellation guard failure, missing or unexpected results');
   check(summary?.env?.PREFLIGHT_RESULT === '${{ needs.preflight.result }}' && summary.env.SOURCE_RESULT === '${{ needs.validate.result }}' && summary.env.PLATFORM_RESULT === '${{ needs.platform-compile.result }}', 'Summary must inspect every actual upstream result');
   check(summary?.run?.includes('exit "$failed"'), 'Summary must propagate non-successful status');
   return failures;
