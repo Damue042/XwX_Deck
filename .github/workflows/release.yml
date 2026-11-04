@@ -362,7 +362,7 @@ jobs:
         run: node tools/release/write-release-manifest.mjs release-assets --unsigned-preview
 
       - name: Generate build provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: release-assets/*
 
