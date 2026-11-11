@@ -19,7 +19,7 @@ jobs:
       CARGO_TARGET_DIR: test-results/native-target
       XWX_PRIOR_NATIVE_RUN: ${{ inputs.prior_run_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
